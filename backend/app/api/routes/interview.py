@@ -109,7 +109,8 @@ async def respond_to_question(payload: ResponsePayload):
         session.status = "NEED_ASSISTANCE"
         db_store.log_audit(session_id, f"Exception escalated: {exception_cat}", "Task Router", "SYSTEM_AUDIT", f"Assigned to {tier}")
 
-    next_q = AdaptiveInterviewEngine.get_next_question(payload.question_id)
+    responses_history = db_store.responses.get(session_id, [])
+    next_q = AdaptiveInterviewEngine.get_next_question(payload.question_id, responses_history)
     if next_q is None:
         session.demo_stage = 4 # Ready for document scan
 

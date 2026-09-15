@@ -5,8 +5,10 @@ import { Activity, Shield, UserCheck, Stethoscope, Settings, Play } from 'lucide
 export const Navbar: React.FC = () => {
   const location = useLocation();
   const isKiosk = location.pathname.startsWith('/kiosk');
+  const isPortal = location.pathname.startsWith('/navigator') || location.pathname.startsWith('/doctor') || location.pathname.startsWith('/admin');
 
-  if (isKiosk) return null; // Kiosk mode has dedicated full-screen header
+  // Portal pages have their own headers
+  if (isKiosk || isPortal) return null;
 
   return (
     <header className="sticky top-0 z-50 bg-slate-900/90 backdrop-blur-md border-b border-slate-800">

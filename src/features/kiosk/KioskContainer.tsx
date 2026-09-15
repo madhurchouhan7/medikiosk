@@ -243,9 +243,7 @@ export const KioskContainer: React.FC = () => {
           handleStopListening(result.transcript, result.confidence);
         }
       }, () => {
-        if (speechState === 'LISTENING') {
-          handleStopListening(liveTranscript);
-        }
+        handleStopListening(liveTranscript);
       });
     } else {
       // Fallback: use MediaRecorder for audio capture
@@ -666,4 +664,408 @@ export const KioskContainer: React.FC = () => {
                                 'bg-amber-500/20 text-amber-400'}`}>
                               {rec.type.replace('_', ' ')}
                             </span>
-        
+                            <span className="text-[10px] text-slate-500">{rec.date}</span>
+                          </div>
+                          <p className="text-xs text-slate-300 font-medium">{rec.summary}</p>
+                          <p className="text-[10px] text-slate-500 mt-0.5">{rec.doctor} · {rec.facility}</p>
+                          {rec.medications && (
+                            <div className="flex flex-wrap gap-1 mt-1.5">
+                              {rec.medications.map((m, i) => (
+                                <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">{m}</span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <button
+                onClick={() => setStep('consent')}
+                className="w-full py-3.5 rounded-xl bg-teal-500 hover:bg-teal-400 text-white font-bold flex items-center justify-center gap-2 transition-colors"
+              >
+                <span>Continue to Intake</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          {/* ══ STEP 3: CONSENT ══════════════════════════════════════════════ */}
+          {step === 'consent' && (
+            <div className="space-y-5 animate-fadeIn">
+              {patient && (
+                <div className="flex items-center gap-3 p-4 rounded-xl bg-[#1a1f2a] border border-white/5">
+                  <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-lg font-bold text-white shrink-0">
+                    {patient.name.charAt(0)}
+                  </div>
+                  <div>
+                    <div className="font-bold text-white text-sm">{patient.name}</div>
+                    <div className="text-[11px] text-slate-500">ABHA: {patient.abha_id} · {patient.age} yrs</div>
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-5 h-5 text-teal-400" />
+                  <h2 className="font-bold text-white">{strings.consentTitle}</h2>
+                </div>
+                <div className="p-4 rounded-xl bg-[#1a1f2a] border border-white/5 text-sm text-slate-300 leading-relaxed">
+                  {strings.consentText}
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={handleReadConsent}
+                  className="flex items-center gap-2 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 text-sm font-medium transition-colors"
+                >
+                  {ttsActive ? <VolumeX className="w-4 h-4" onClick={() => { tts.cancel(); setTtsActive(false); }} /> : <Volume2 className="w-4 h-4" />}
+                  <span>{strings.readAloud}</span>
+                </button>
+                <button
+                  onClick={handleConsent}
+                  className="flex-1 py-3 rounded-xl bg-teal-500 hover:bg-teal-400 text-white font-bold flex items-center justify-center gap-2 transition-colors"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>{strings.agree}</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ══ STEP 4: AI VOICE INTERVIEW ════════════════════════════════════ */}
+          {step === 'interview' && currentQuestion && (
+            <div className="space-y-5 animate-fadeIn">
+              {/* Progress & Category Banner */}
+              <div className="flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded-full bg-teal-500/10 border border-teal-500/20 text-[10px] font-bold text-teal-400 uppercase tracking-wider">
+                    {currentQuestion.category.startsWith('HPI_')
+                      ? `HPI · SOCRATES ${currentQuestion.category.replace('HPI_', '')}`
+                      : currentQuestion.category.replace(/_/g, ' ')}
+                  </span>
+                </div>
+                <span className="text-slate-500 text-[11px] font-medium">Inquiry Turn {interviewHistory.length + 1}</span>
+              </div>
+              <div className="h-1 bg-white/5 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-teal-500 rounded-full transition-all duration-500"
+                  style={{ width: `${Math.min(100, Math.max(8, ((interviewHistory.length + 1) / 14) * 100))}%` }}
+                />
+              </div>
+
+              {/* Question */}
+              <div className="text-center space-y-2">
+                <h2 className="text-xl sm:text-2xl font-bold text-white leading-snug">
+                  {currentQuestion.text[lang] || currentQuestion.text['en']}
+                </h2>
+                <button
+                  onClick={() => readQuestionAloud(currentQuestion)}
+                  className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-teal-400 transition-colors"
+                >
+                  <Volume2 className="w-3.5 h-3.5" />
+                  <span>Listen</span>
+                </button>
+              </div>
+
+              {/* Mic Button */}
+              <div className="flex flex-col items-center gap-3">
+                {speechState === 'THINKING' ? (
+                  <div className="w-20 h-20 rounded-full bg-[#1a1f2a] border-2 border-white/10 flex items-center justify-center">
+                    <Loader2 className="w-8 h-8 text-teal-400 animate-spin" />
+                  </div>
+                ) : (
+                  <button
+                    onClick={speechState === 'LISTENING' ? () => handleStopListening() : handleStartListening}
+                    className={`w-20 h-20 rounded-full flex items-center justify-center transition-all active:scale-95 shadow-lg
+                      ${speechState === 'LISTENING'
+                        ? 'bg-red-500 shadow-red-500/30 ring-4 ring-red-500/20 animate-pulse'
+                        : 'bg-teal-500 shadow-teal-500/20 hover:bg-teal-400'}`}
+                  >
+                    {speechState === 'LISTENING' ? (
+                      <MicOff className="w-8 h-8 text-white" />
+                    ) : (
+                      <Mic className="w-8 h-8 text-white" />
+                    )}
+                  </button>
+                )}
+
+                {speechState === 'LISTENING' && (
+                  <div className="text-center space-y-1">
+                    <div className="flex items-center gap-2 justify-center text-red-400">
+                      <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                      <span className="text-sm font-medium">Recording... {micSeconds}s</span>
+                      <span className="text-xs text-slate-500">(max 15s)</span>
+                    </div>
+                    {liveTranscript && (
+                      <p className="text-sm text-teal-300 italic">"{liveTranscript}"</p>
+                    )}
+                  </div>
+                )}
+
+                {speechState === 'ASKING' && (
+                  <p className="text-sm text-slate-500">{strings.speakNow}</p>
+                )}
+              </div>
+
+              {/* Touch Options */}
+              {currentQuestion.options && speechState !== 'THINKING' && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-[10px] text-slate-600 uppercase tracking-widest">
+                    <div className="flex-1 h-px bg-white/5" />
+                    <span>{strings.orTouch}</span>
+                    <div className="flex-1 h-px bg-white/5" />
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {currentQuestion.options.map((opt, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => handleAnswerSubmit(opt)}
+                        className="p-3.5 rounded-xl bg-[#1a1f2a] hover:bg-[#1e2435] border border-white/5 hover:border-teal-500/30 text-left text-sm font-medium text-slate-200 hover:text-white transition-all"
+                      >
+                        {opt}
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => handleAnswerSubmit("I don't remember / याद नहीं")}
+                      className="p-3.5 rounded-xl bg-[#1a1f2a] hover:bg-[#1e2435] border border-white/5 hover:border-amber-500/30 text-left text-sm font-medium text-amber-500 transition-all sm:col-span-2"
+                    >
+                      I don't remember / याद नहीं
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Interview history */}
+              {interviewHistory.length > 0 && (
+                <div className="space-y-1.5 pt-2 border-t border-white/5">
+                  <p className="text-[10px] text-slate-600 uppercase tracking-wider">Captured so far</p>
+                  {interviewHistory.map((h, i) => (
+                    <div key={i} className="flex items-center justify-between gap-3 p-2.5 rounded-lg bg-[#1a1f2a]">
+                      <div className="min-w-0">
+                        <p className="text-[10px] text-slate-500 truncate">{h.q}</p>
+                        <p className="text-xs text-teal-400 font-medium truncate">{h.a}</p>
+                      </div>
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ══ STEP 5: DOCUMENT SCANNER ══════════════════════════════════════ */}
+          {step === 'documents' && (
+            <div className="space-y-5 animate-fadeIn">
+              <div className="text-center space-y-1">
+                <div className="w-12 h-12 rounded-2xl bg-purple-500/20 border border-purple-500/30 flex items-center justify-center mx-auto mb-3">
+                  <FileText className="w-6 h-6 text-purple-400" />
+                </div>
+                <h2 className="text-xl font-bold text-white">{strings.docScanTitle}</h2>
+                <p className="text-sm text-slate-400">{strings.docScanDesc}</p>
+              </div>
+
+              {ocrProcessing ? (
+                <div className="text-center py-12 space-y-3">
+                  <Loader2 className="w-10 h-10 text-teal-400 animate-spin mx-auto" />
+                  <p className="text-sm font-medium text-teal-400">{strings.ocrProcessing}</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {/* Upload Zone */}
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-full p-8 rounded-2xl bg-[#1a1f2a] border-2 border-dashed border-white/10 hover:border-teal-500/50 hover:bg-[#1e2435] transition-all group text-center space-y-3"
+                  >
+                    <div className="w-12 h-12 rounded-xl bg-teal-500/10 flex items-center justify-center mx-auto group-hover:bg-teal-500/20 transition-colors">
+                      <Upload className="w-6 h-6 text-teal-400" />
+                    </div>
+                    <div>
+                      <p className="font-bold text-white text-sm">Upload Prescription / Report</p>
+                      <p className="text-[11px] text-slate-500 mt-1">Photo, PDF, or image file · Camera available on mobile</p>
+                    </div>
+                  </button>
+
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*,application/pdf"
+                    capture="environment"
+                    onChange={e => handleFileUpload(e.target.files)}
+                    className="hidden"
+                  />
+
+                  {/* Uploaded files preview */}
+                  {uploadedFiles.length > 0 && (
+                    <div className="space-y-2">
+                      {uploadedFiles.map((f, i) => (
+                        <div key={i} className="flex items-center gap-3 p-3 rounded-xl bg-[#1a1f2a] border border-white/5">
+                          <FileIcon className="w-4 h-4 text-teal-400 shrink-0" />
+                          <span className="text-sm text-slate-300 truncate flex-1">{f.name}</span>
+                          <span className="text-[10px] text-slate-500">{(f.size / 1024).toFixed(0)} KB</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-3 text-[11px] text-slate-600">
+                    <div className="flex-1 h-px bg-white/5" />
+                    <span>or</span>
+                    <div className="flex-1 h-px bg-white/5" />
+                  </div>
+
+                  <button
+                    onClick={handleSkipDocuments}
+                    className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 text-sm font-medium transition-colors"
+                  >
+                    Skip — No documents to upload
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ══ STEP 6: REVIEW ════════════════════════════════════════════════ */}
+          {step === 'review' && (
+            <div className="space-y-4 animate-fadeIn">
+              <div className="flex items-center justify-between">
+                <h2 className="font-bold text-white text-lg">{strings.reviewTitle}</h2>
+                {isLowConf ? (
+                  <span className="text-[10px] px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-medium">
+                    Sent to Reviewer
+                  </span>
+                ) : (
+                  <span className="text-[10px] px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">
+                    Ready for Doctor
+                  </span>
+                )}
+              </div>
+
+              {/* Patient info */}
+              {patient && (
+                <div className="p-3.5 rounded-xl bg-[#1a1f2a] border border-white/5 flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-sm font-bold shrink-0">
+                    {patient.name.charAt(0)}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-white">{patient.name}</p>
+                    <p className="text-[10px] text-slate-500">ABHA: {patient.abha_id} · {patient.age} yrs · {patient.gender}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Red Flag */}
+              {hasRedFlag && (
+                <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 flex items-start gap-3">
+                  <AlertOctagon className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-bold text-red-400 text-sm">Clinical Red Flag — Chest Pain</p>
+                    <p className="text-xs text-slate-400 mt-0.5">Emergency triage protocol initiated. Prioritised before OPD queue.</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Interview Summary */}
+              {interviewHistory.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Voice Interview</p>
+                  {interviewHistory.map((item, idx) => (
+                    <div key={idx} className="p-3 rounded-xl bg-[#1a1f2a] border border-white/5">
+                      <p className="text-[10px] text-slate-500">{item.q}</p>
+                      <p className="text-sm font-medium text-teal-300 mt-0.5">{item.a}</p>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-[9px] text-slate-600 uppercase">Patient Reported</span>
+                        {item.confidence && (
+                          <span className="text-[9px] text-slate-600">· STT {Math.round(item.confidence * 100)}%</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* OCR Entities */}
+              {extractedEntities.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Extracted from Documents</p>
+                  {ocrRawText && (
+                    <div className="p-3 rounded-xl bg-[#1a1f2a] border border-white/5">
+                      <p className="text-[10px] text-slate-500 mb-1">OCR Raw Text</p>
+                      <p className="text-xs font-mono text-slate-300">{ocrRawText}</p>
+                    </div>
+                  )}
+                  {extractedEntities.map((med, idx) => (
+                    <div key={idx} className="p-3 rounded-xl bg-[#1a1f2a] border border-white/5 flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-bold text-white">{med.entity_name} {med.dosage && `— ${med.dosage}`}</p>
+                        <p className="text-[10px] text-slate-500">{med.frequency} · {med.source_ref}</p>
+                      </div>
+                      <span className={`text-[10px] px-2 py-0.5 rounded font-bold
+                        ${med.confidence >= 0.8 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'}`}>
+                        {Math.round(med.confidence * 100)}%
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <button
+                onClick={handleCompleteSession}
+                className="w-full py-4 rounded-xl bg-teal-500 hover:bg-teal-400 text-white font-bold flex items-center justify-center gap-2 transition-colors"
+              >
+                <CheckCircle2 className="w-5 h-5" />
+                <span>{strings.finishBtn}</span>
+              </button>
+            </div>
+          )}
+
+          {/* ══ STEP 7: COMPLETE ══════════════════════════════════════════════ */}
+          {step === 'complete' && (
+            <div className="text-center space-y-6 animate-fadeIn">
+              <div className="w-16 h-16 rounded-full bg-emerald-500 flex items-center justify-center mx-auto">
+                <CheckCircle2 className="w-9 h-9 text-white" />
+              </div>
+
+              <div>
+                <h2 className="text-2xl font-bold text-white">{strings.thankYou}</h2>
+                <p className="text-sm text-slate-400 mt-2 max-w-sm mx-auto">{strings.resetNotice}</p>
+              </div>
+
+              {patient && (
+                <div className="p-4 rounded-xl bg-[#1a1f2a] border border-white/5 inline-block mx-auto">
+                  <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Patient</p>
+                  <p className="font-bold text-white">{patient.name}</p>
+                  <p className="text-xs text-teal-400 font-mono">{patient.abha_id}</p>
+                </div>
+              )}
+
+              <div className="flex items-center justify-center gap-2 text-slate-500">
+                <Clock className="w-4 h-4" />
+                <span className="text-sm">Resetting in <span className="font-bold text-white">{resetCountdown}s</span></span>
+              </div>
+
+              <div className="flex justify-center gap-3">
+                <Link
+                  to="/navigator"
+                  className="px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-sm font-medium hover:bg-amber-500/20 transition-colors"
+                >
+                  Navigator View
+                </Link>
+                <Link
+                  to="/doctor"
+                  className="px-4 py-2.5 rounded-xl bg-teal-500 text-white text-sm font-bold hover:bg-teal-400 transition-colors"
+                >
+                  Doctor View
+                </Link>
+              </div>
+            </div>
+          )}
+
+        </div>
+      </main>
+    </div>
+  );
+};

@@ -144,12 +144,18 @@ class ClinicalSummary(BaseModel):
     patient: Patient
     chief_complaint: str
     hpi_summary: str
-    past_medical_history: List[str]
-    medications: List[ExtractedEntity]
-    allergies: List[str]
-    review_of_systems: List[str]
-    red_flags: List[RedFlagAlert]
-    missing_or_uncertain_info: List[str]
+    socrates_breakdown: Optional[Dict[str, str]] = None
+    past_medical_history: List[str] = []
+    past_surgical_history: List[str] = []
+    medications: List[ExtractedEntity] = []
+    allergies: List[str] = []
+    family_history: List[str] = []
+    personal_social_history: List[str] = []
+    review_of_systems: List[str] = []
+    previous_treatment: List[str] = []
+    previous_investigations: List[str] = []
+    red_flags: List[RedFlagAlert] = []
+    missing_or_uncertain_info: List[str] = []
     physician_verified: bool = False
     physician_notes: Optional[str] = None
     disclaimer: str = "AI-assisted summary — physician verification required."

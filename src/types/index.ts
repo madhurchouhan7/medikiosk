@@ -77,10 +77,16 @@ export interface ClinicalSummary {
   patient: Patient;
   chief_complaint: string;
   hpi_summary: string;
+  socrates_breakdown?: Record<string, string>;
   past_medical_history: string[];
+  past_surgical_history?: string[];
   medications: ExtractedEntity[];
   allergies: string[];
+  family_history?: string[];
+  personal_social_history?: string[];
   review_of_systems: string[];
+  previous_treatment?: string[];
+  previous_investigations?: string[];
   red_flags: RedFlagAlert[];
   missing_or_uncertain_info: string[];
   physician_verified: boolean;

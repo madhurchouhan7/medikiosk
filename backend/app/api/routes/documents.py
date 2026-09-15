@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Form
+from fastapi import APIRouter, HTTPException, Form, UploadFile, File
+from typing import Optional
 from app.models.schemas import DocumentProcessResult, AssistanceTask
 from app.db.memory_store import db_store
 from app.services.ocr.provider import get_ocr_provider
@@ -11,7 +12,8 @@ router = APIRouter(prefix="/documents", tags=["Documents"])
 async def process_document(
     session_id: str = Form(...),
     doc_type: str = Form("PRESCRIPTION"),
-    file_name: str = Form("prescription_scan.jpg")
+    file_name: str = Form("prescription_scan.jpg"),
+    file: Optional[UploadFile] = File(None)
 ):
     if session_id not in db_store.sessions:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -20,8 +22,14 @@ async def process_document(
     session.current_step = "documents"
     session.demo_stage = 4
 
+    # Read file bytes if uploaded
+    file_bytes: Optional[bytes] = None
+    if file and file.filename:
+        file_bytes = await file.read()
+        file_name = file.filename  # Use actual filename
+
     ocr_provider = get_ocr_provider()
-    result = await ocr_provider.process_document(session_id, doc_type, file_name)
+    result = await ocr_provider.process_document(session_id, doc_type, file_name, file_bytes)
 
     # Store extracted entities with AI_EXTRACTED provenance
     for e in result.entities:
@@ -46,7 +54,7 @@ async def process_document(
 
     # If low confidence or explicitly requires verification, route to Tier 2 Remote Hub
     if result.requires_verification or assistance_score < settings.LOW_CONFIDENCE_THRESHOLD:
-        session.demo_stage = 6 # Simulated low-confidence case (AI detects uncertainty)
+        session.demo_stage = 6
         task = AssistanceTask(
             session_id=session_id,
             patient_name=session.patient.name,
@@ -69,6 +77,6 @@ async def process_document(
             "Assigned to Tier 2 Remote Documentation Reviewer Hub"
         )
     else:
-        session.demo_stage = 5 # Normal case - proceeds automatically
+        session.demo_stage = 5
 
     return result

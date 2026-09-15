@@ -349,3 +349,105 @@ export const NavigatorDashboard: React.FC = () => {
                     </div>
 
                     {selectedTask.entities.length > 0 && (
+                      <div className="p-3 rounded-lg bg-[#0f1117] border border-white/5 font-mono text-xs text-amber-300">
+                        {selectedTask.entities.map((e, i) => (
+                          <div key={i}>Rx: {e.entity_name} {e.dosage ? `[${e.dosage}]` : ''} {e.frequency || ''}</div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Interview responses for context */}
+                  </div>
+                </div>
+
+                {/* Right: Verification editor */}
+                <div className="space-y-3">
+                  <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                    <Edit3 className="w-3.5 h-3.5 text-amber-400" />
+                    Human Verification
+                  </h3>
+
+                  {editableEntities.length > 0 ? (
+                    <div className="space-y-3">
+                      {editableEntities.map(e => (
+                        <div key={e.id} className="p-4 rounded-xl bg-[#151820] border border-white/5 space-y-3">
+                          <div className="space-y-1.5">
+                            <label className="text-[11px] font-medium text-slate-500">Medication Name</label>
+                            <input
+                              type="text"
+                              value={e.entity_name}
+                              onChange={ev => handleEntityChange(e.id, 'entity_name', ev.target.value)}
+                              className="w-full px-3 py-2.5 rounded-lg bg-[#0f1117] border border-white/10 text-white text-sm font-medium focus:border-amber-500/60 focus:outline-none"
+                            />
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="space-y-1.5">
+                              <label className="text-[11px] font-medium text-slate-500">Verified Dosage</label>
+                              <input
+                                type="text"
+                                value={e.dosage || ''}
+                                onChange={ev => handleEntityChange(e.id, 'dosage', ev.target.value)}
+                                placeholder="5mg"
+                                className="w-full px-3 py-2 rounded-lg bg-[#0f1117] border border-white/10 text-teal-400 text-sm font-mono focus:border-amber-500/60 focus:outline-none"
+                              />
+                            </div>
+                            <div className="space-y-1.5">
+                              <label className="text-[11px] font-medium text-slate-500">Frequency</label>
+                              <input
+                                type="text"
+                                value={e.frequency || ''}
+                                onChange={ev => handleEntityChange(e.id, 'frequency', ev.target.value)}
+                                placeholder="Once daily (OD)"
+                                className="w-full px-3 py-2 rounded-lg bg-[#0f1117] border border-white/10 text-white text-sm focus:border-amber-500/60 focus:outline-none"
+                              />
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 pt-1">
+                            <div className="w-2 h-2 rounded-full bg-amber-500" />
+                            <span className="text-[10px] text-slate-500">AI_EXTRACTED → will become HUMAN_VERIFIED on save</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="p-5 rounded-xl bg-[#151820] border border-white/5 text-sm text-slate-500 space-y-2">
+                      <User className="w-8 h-8 opacity-30" />
+                      <p className="font-medium text-slate-400">Non-document exception</p>
+                      <p className="text-xs">Go to Kiosk terminal to assist patient directly (touchscreen guidance, language support).</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Action footer */}
+              <div className="flex items-center justify-between pt-4 border-t border-white/5">
+                <div className="flex items-center gap-2">
+                  <ShieldAlert className="w-4 h-4 text-slate-600" />
+                  <span className="text-[11px] text-slate-600">Resolution sets provenance to <strong className="text-emerald-400">HUMAN_VERIFIED</strong></span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleEscalateTask}
+                    className="px-4 py-2.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 text-sm font-medium transition-colors"
+                  >
+                    Escalate
+                  </button>
+                  <button
+                    onClick={handleResolveTask}
+                    disabled={resolving}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-900 text-sm font-bold transition-colors disabled:opacity-50"
+                  >
+                    {resolving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                    {resolving ? 'Saving...' : 'Verify & Resolve'}
+                  </button>
+                </div>
+              </div>
+
+            </div>
+          )}
+        </main>
+      </div>
+    </div>
+  );
+};

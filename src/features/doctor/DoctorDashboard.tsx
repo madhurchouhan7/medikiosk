@@ -318,4 +318,284 @@ export const DoctorDashboard: React.FC = () => {
         <main className="flex-1 overflow-y-auto">
           {isLoading ? (
             <div className="h-full flex items-center justify-center">
-              <div className="text-center space-y
+              <div className="text-center space-y-3">
+                <Loader2 className="w-8 h-8 text-teal-400 animate-spin mx-auto" />
+                <p className="text-sm text-slate-500">Loading patient summary...</p>
+              </div>
+            </div>
+          ) : !summary ? (
+            <div className="h-full flex items-center justify-center text-slate-600 text-sm">
+              <div className="text-center space-y-2">
+                <Stethoscope className="w-10 h-10 mx-auto opacity-30" />
+                <p>Select a patient to view their intake summary</p>
+              </div>
+            </div>
+          ) : (
+            <div className="max-w-4xl mx-auto p-6 space-y-5">
+
+              {/* Patient demographics */}
+              <div className="p-4 rounded-xl bg-[#151820] border border-white/5 flex items-center gap-4">
+                <div className="w-12 h-12 rounded-full bg-slate-700 flex items-center justify-center text-lg font-bold text-white shrink-0">
+                  {summary.patient.name.charAt(0)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h2 className="text-lg font-bold text-white">{summary.patient.name}</h2>
+                  <div className="flex items-center gap-3 text-xs text-slate-400 flex-wrap">
+                    <span>{summary.patient.age} yrs · {summary.patient.gender}</span>
+                    <span>·</span>
+                    <span className="font-mono text-teal-400">ABHA: {summary.patient.abha_id}</span>
+                    <span>·</span>
+                    <span>{summary.patient.language_preference?.toUpperCase()}</span>
+                    {summary.patient.phone && <span>· {summary.patient.phone}</span>}
+                  </div>
+                </div>
+                {summary.physician_verified && (
+                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    <span className="text-xs text-emerald-400 font-medium">Verified</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Red Flags */}
+              {urgentFlags.length > 0 && (
+                <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <AlertOctagon className="w-4 h-4 text-red-400" />
+                    <span className="text-sm font-bold text-red-400">URGENT — Clinical Red Flags</span>
+                  </div>
+                  {urgentFlags.map((f, i) => (
+                    <div key={i} className="pl-6 space-y-0.5">
+                      <p className="text-sm font-medium text-white">{f.symptom}</p>
+                      <p className="text-xs text-slate-400">{f.message}</p>
+                      <p className="text-xs text-red-300 font-medium">→ {f.action_required}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {attentionFlags.length > 0 && (
+                <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-400" />
+                    <span className="text-sm font-bold text-amber-400">Attention — Risk Factors</span>
+                  </div>
+                  {attentionFlags.map((f, i) => (
+                    <div key={i} className="pl-6">
+                      <span className="text-sm font-medium text-white">{f.symptom}: </span>
+                      <span className="text-sm text-slate-400">{f.message}</span>
+                      <p className="text-xs text-amber-300 mt-0.5">→ {f.action_required}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* AI disclaimer */}
+              <div className="flex items-center gap-2 py-2 px-3 rounded-lg bg-white/3 border border-white/5 text-[11px] text-slate-500">
+                <Activity className="w-3.5 h-3.5 text-teal-400 shrink-0" />
+                <span>{summary.disclaimer}</span>
+              </div>
+
+              {/* Summary Table */}
+              <div className="rounded-xl bg-[#151820] border border-white/5 overflow-hidden">
+                <div className="px-5 py-3 border-b border-white/5 flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-teal-400 uppercase tracking-wider">Clinical Intake — SOAP Format</span>
+                  <span className="text-[10px] text-slate-600">Full provenance enabled</span>
+                </div>
+
+                {/* 1. Chief Complaint */}
+                <SummaryRow label="Chief Complaint" prov="PATIENT_REPORTED">
+                  <span className="font-bold text-white text-base">{summary.chief_complaint}</span>
+                </SummaryRow>
+
+                {/* 2. HPI / SOCRATES Narrative & Breakdown */}
+                <SummaryRow label="HPI (SOCRATES)" prov="PATIENT_REPORTED">
+                  <div className="space-y-3">
+                    <p className="text-slate-200 leading-relaxed font-medium">{summary.hpi_summary}</p>
+                    {summary.socrates_breakdown && Object.keys(summary.socrates_breakdown).length > 0 && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-3 rounded-xl bg-white/3 border border-white/5 text-xs">
+                        {Object.entries(summary.socrates_breakdown).map(([dim, val]) => (
+                          <div key={dim} className="space-y-0.5">
+                            <span className="text-[10px] text-teal-400 font-bold uppercase">{dim}:</span>
+                            <p className="text-slate-300">{val}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </SummaryRow>
+
+                {/* 3. Previous Treatment for this Episode */}
+                {summary.previous_treatment && summary.previous_treatment.length > 0 && (
+                  <SummaryRow label="Prior Treatment" prov="PATIENT_REPORTED">
+                    <ul className="space-y-1">
+                      {summary.previous_treatment.map((t, i) => (
+                        <li key={i} className="text-slate-300">• {t}</li>
+                      ))}
+                    </ul>
+                  </SummaryRow>
+                )}
+
+                {/* 4. Past Medical History */}
+                <SummaryRow label="Past Medical" prov="PATIENT_REPORTED">
+                  <ul className="space-y-1">
+                    {summary.past_medical_history.map((h, i) => (
+                      <li key={i} className="text-slate-300">• {h}</li>
+                    ))}
+                  </ul>
+                </SummaryRow>
+
+                {/* 5. Past Surgical & Hospitalization */}
+                {summary.past_surgical_history && summary.past_surgical_history.length > 0 && (
+                  <SummaryRow label="Past Surgical" prov="PATIENT_REPORTED">
+                    <ul className="space-y-1">
+                      {summary.past_surgical_history.map((s, i) => (
+                        <li key={i} className="text-slate-300">• {s}</li>
+                      ))}
+                    </ul>
+                  </SummaryRow>
+                )}
+
+                {/* 6. Current Medications (OCR + Reported) */}
+                <SummaryRow label="Medications" prov={summary.medications[0]?.provenance || "PATIENT_REPORTED"}>
+                  <div className="space-y-2">
+                    {summary.medications.length === 0 ? (
+                      <span className="text-slate-500 italic">No regular medications extracted or reported</span>
+                    ) : summary.medications.map((m, i) => (
+                      <div key={i} className="p-2.5 rounded-lg bg-white/3 border border-white/5 flex items-center justify-between gap-3">
+                        <div>
+                          <span className="font-bold text-white">{m.entity_name}</span>
+                          {m.dosage && <span className="text-slate-400"> {m.dosage}</span>}
+                          {m.frequency && <p className="text-[11px] text-slate-500 mt-0.5">{m.frequency}</p>}
+                          <p className="text-[10px] text-slate-600 mt-0.5 font-mono">{m.source_ref}</p>
+                        </div>
+                        <div className="flex flex-col items-end gap-1">
+                          <ProvenanceBadge prov={m.provenance} />
+                          {m.verified_by && (
+                            <span className="text-[9px] text-slate-600">{m.verified_by}</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </SummaryRow>
+
+                {/* 7. Allergies */}
+                <SummaryRow label="Allergies" prov="PATIENT_REPORTED">
+                  <span className={summary.allergies[0]?.includes('Allergic') ? 'text-red-400 font-bold' : 'text-slate-300'}>
+                    {summary.allergies.join(', ')}
+                  </span>
+                </SummaryRow>
+
+                {/* 8. Family History */}
+                {summary.family_history && summary.family_history.length > 0 && (
+                  <SummaryRow label="Family History" prov="PATIENT_REPORTED">
+                    <ul className="space-y-1">
+                      {summary.family_history.map((f, i) => (
+                        <li key={i} className="text-slate-300">• {f}</li>
+                      ))}
+                    </ul>
+                  </SummaryRow>
+                )}
+
+                {/* 9. Personal & Social History */}
+                {summary.personal_social_history && summary.personal_social_history.length > 0 && (
+                  <SummaryRow label="Personal/Social" prov="PATIENT_REPORTED">
+                    <ul className="space-y-1">
+                      {summary.personal_social_history.map((p, i) => (
+                        <li key={i} className="text-slate-300">• {p}</li>
+                      ))}
+                    </ul>
+                  </SummaryRow>
+                )}
+
+                {/* 10. Review of Systems */}
+                <SummaryRow label="System Review" prov="PATIENT_REPORTED">
+                  <ul className="space-y-1">
+                    {summary.review_of_systems.map((s, i) => (
+                      <li key={i} className="text-slate-300">• {s}</li>
+                    ))}
+                  </ul>
+                </SummaryRow>
+
+                {/* 11. Previous Investigations / Records */}
+                {summary.previous_investigations && summary.previous_investigations.length > 0 && (
+                  <SummaryRow label="Prior Reports" prov="PATIENT_REPORTED">
+                    <ul className="space-y-1">
+                      {summary.previous_investigations.map((r, i) => (
+                        <li key={i} className="text-slate-300">• {r}</li>
+                      ))}
+                    </ul>
+                  </SummaryRow>
+                )}
+
+                {/* 12. Gaps / Uncertain Items */}
+                {summary.missing_or_uncertain_info.length > 0 && (
+                  <SummaryRow label="Gaps / Uncertainty" prov="HUMAN_VERIFIED">
+                    <ul className="space-y-1">
+                      {summary.missing_or_uncertain_info.map((item, i) => (
+                        <li key={i} className="text-amber-300">• {item}</li>
+                      ))}
+                    </ul>
+                  </SummaryRow>
+                )}
+
+                {summary.physician_notes && (
+                  <SummaryRow label="Doctor Notes" prov="CLINICIAN_CONFIRMED">
+                    <span className="text-teal-300 italic">{summary.physician_notes}</span>
+                  </SummaryRow>
+                )}
+              </div>
+
+            </div>
+          )}
+        </main>
+      </div>
+
+      {/* ── Sign-Off Modal ───────────────────────────────────────────────────── */}
+      {showSignOffModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#151820] border border-white/10 rounded-2xl p-6 w-full max-w-md space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-white">Sign Off Clinical Summary</h3>
+              <button onClick={() => setShowSignOffModal(false)} className="text-slate-500 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-sm text-slate-400">
+              Signing off confirms this summary is clinically accurate. It will be marked as <span className="text-teal-400 font-medium">CLINICIAN_CONFIRMED</span> in the audit trail.
+            </p>
+
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-slate-500">Physician Notes (optional)</label>
+              <textarea
+                value={physicianNotes}
+                onChange={e => setPhysicianNotes(e.target.value)}
+                placeholder="e.g., Reviewed and accepted. Refer for knee X-ray."
+                rows={3}
+                className="w-full px-3 py-2.5 rounded-lg bg-[#0f1117] border border-white/10 text-white text-sm focus:border-teal-500/60 focus:outline-none resize-none"
+              />
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowSignOffModal(false)}
+                className="flex-1 py-2.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 text-sm transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSignOff}
+                disabled={isVerifying}
+                className="flex-1 py-2.5 rounded-lg bg-teal-500 hover:bg-teal-400 text-white font-bold text-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+              >
+                {isVerifying ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                {isVerifying ? 'Saving...' : 'Confirm Sign-Off'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

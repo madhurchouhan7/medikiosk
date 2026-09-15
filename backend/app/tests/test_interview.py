@@ -12,8 +12,15 @@ async def test_adaptive_question_flow():
     q1 = AdaptiveInterviewEngine.get_first_question()
     assert q1.question_id == "q_chief_complaint"
 
+    # SOCRATES Site is the next question following Chief Complaint
     q2 = AdaptiveInterviewEngine.get_next_question("q_chief_complaint")
-    assert q2.question_id == "q_hpi_onset"
+    assert q2.question_id == "q_hpi_site"
+
+    # Verify specialty domain adaptation: Cardiac complaint routes to cardiac SOCRATES questions
+    cardiac_history = [{"category": "CHIEF_COMPLAINT", "answer_text": "Acute chest pain"}]
+    q_cardiac_site = AdaptiveInterviewEngine.get_next_question("q_chief_complaint", cardiac_history)
+    assert q_cardiac_site.question_id == "q_hpi_site"
+    assert "chest" in q_cardiac_site.text["en"].lower()
 
 @pytest.mark.asyncio
 async def test_unknown_response_handling():
