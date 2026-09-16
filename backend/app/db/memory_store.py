@@ -9,9 +9,11 @@ from app.models.schemas import (
 )
 
 # JSON snapshot file. Survives server restarts (mount as a volume in Docker).
-DATA_FILE = os.getenv("MEDIKIOSK_DATA_FILE", os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "..", "data",
-    "medikiosk_store.json"))
+DATA_FILE = os.getenv(
+    "NIRAMAYA_DATA_FILE",
+    os.getenv("MEDIKIOSK_DATA_FILE", os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "..", "data",
+        "niramaya_store.json")))
 
 
 class InMemoryStore:
@@ -154,17 +156,20 @@ class InMemoryStore:
         ClinicalSummaryGenerator. Only the *input utterances* are synthetic
         (clearly-labelled demo patients) — everything downstream is computed.
         """
-        import asyncio
         from app.core.confidence import AssistanceScoreEngine
-        from app.services.ai.provider import MockLLMProvider
         from app.services.ocr.provider import extract_medication_entities
         from app.services.summary.generator import ClinicalSummaryGenerator
 
-        llm = MockLLMProvider()
-
         def add_response(session_id: str, qid: str, category: str, text: str):
-            turn = asyncio.get_event_loop().run_until_complete(
-                llm.process_turn(category, text, self.responses[session_id]))
+            # Sync version of MockLLMProvider.process_turn is_unknown logic.
+            # Avoids asyncio.run_until_complete at import time, which crashes
+            # under uvicorn/uvloop ("this event loop is already running").
+            cleaned = (text or "").strip().lower()
+            is_unknown = (not cleaned or any(
+                phrase in cleaned for phrase in [
+                    "don't know", "dont know", "don't remember",
+                    "dont remember", "maloom nahi", "pata nahi", "yaad nahi"]))
+            turn = {"is_unknown": is_unknown}
             # Route-level STT/safety signals, same as interview.respond.
             stt = 0.0 if not text.strip() else 0.95
             chest = any(k in text.lower() for k in

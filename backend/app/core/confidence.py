@@ -10,7 +10,7 @@ class AssistanceScoreEngine:
         has_safety_flag: bool = False
     ) -> tuple[float, ExceptionCategory | None]:
         """
-        Calculates the MediKiosk Assistance Score (0.0 to 1.0).
+        Calculates the Niramaya Assistance Score (0.0 to 1.0).
         Higher score = high automation reliability.
         Lower score (<0.65) = triggers escalation task to Navigator.
         """

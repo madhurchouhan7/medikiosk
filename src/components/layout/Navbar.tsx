@@ -19,7 +19,7 @@ export const Navbar: React.FC = () => {
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="font-semibold text-lg text-slate-900 tracking-tight">MediKiosk</span>
+              <span className="font-semibold text-lg text-slate-900 tracking-tight">Niramaya</span>
               <span className="text-[11px] font-medium px-2 py-0.5 rounded border border-slate-200 bg-slate-50 text-slate-600">
                 ABDM Enabled
               </span>

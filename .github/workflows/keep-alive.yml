@@ -1,0 +1,19 @@
+# Free keep-alive for the Render free-tier backend (spins down after ~15 min
+# idle). Pings /api/health every 5 minutes so the site stays warm.
+# Setup: repo Settings → Secrets and variables → Actions → New repository
+# secret → NIRAMAYA_BACKEND_URL = https://<your-service>.onrender.com
+name: keep-backend-awake
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping backend health
+        run: |
+          curl -fsS --max-time 60 "${{ secrets.NIRAMAYA_BACKEND_URL }}/api/health" > /dev/null
+          echo "backend is awake"

@@ -53,9 +53,11 @@ FREQUENCY_MAP = {
     "pc": "After meals (PC)",
 }
 
-UPLOAD_ROOT = os.getenv("MEDIKIOSK_UPLOADS", os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
-    "..", "data", "uploads"))
+UPLOAD_ROOT = os.getenv(
+    "NIRAMAYA_UPLOADS",
+    os.getenv("MEDIKIOSK_UPLOADS", os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
+        "..", "data", "uploads")))
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".pdf", ".webp"}

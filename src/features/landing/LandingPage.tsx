@@ -28,13 +28,15 @@ export const LandingPage: React.FC = () => {
               A calm, structured intake before the consultation begins.
             </h1>
             <p className="text-base sm:text-lg text-slate-600 leading-relaxed mb-3">
-              MediKiosk collects the patient&apos;s story — complaints, history, medicines,
+              Niramaya collects the patient&apos;s story — complaints, history, medicines,
               allergies, and old records — and prepares a short, verifiable summary
               so the doctor can focus on examination and decisions.
             </p>
-            <p className="text-sm text-slate-600 border-l-2 border-teal-700 pl-4 mb-8">
-              Automate the routine. Escalate the uncertain. Verify the important.
-              Keep the clinician in control. The system does not diagnose or prescribe.
+            <p className="text-[15px] font-medium text-slate-800 bg-gradient-to-r from-teal-50 via-emerald-50 to-teal-50 border border-teal-200 border-l-4 border-l-teal-700 rounded-lg px-4 py-3 mb-8 leading-relaxed shadow-sm">
+              Automate the <span className="font-semibold text-teal-800">routine</span>. Escalate the{' '}
+              <span className="font-semibold text-amber-700">uncertain</span>. Verify the{' '}
+              <span className="font-semibold text-teal-800">important</span>. Keep the clinician in{' '}
+              <span className="font-semibold text-slate-900">control</span>. The system does not diagnose or prescribe.
             </p>
             <div className="flex flex-col sm:flex-row gap-3">
               <Link
@@ -141,7 +143,7 @@ export const LandingPage: React.FC = () => {
             <div>
               <h2 className="text-xl sm:text-2xl font-semibold tracking-tight mb-2">Safety boundaries</h2>
               <p className="text-slate-600 text-sm sm:text-base mb-6">
-                MediKiosk is a history-taking assistant. It is not an autonomous doctor.
+                Niramaya is a history-taking assistant. It is not an autonomous doctor.
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="clinical-card p-5">

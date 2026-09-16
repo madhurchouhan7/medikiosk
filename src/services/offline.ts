@@ -10,8 +10,8 @@
 import { useSyncExternalStore, useCallback } from 'react';
 import { ApiService, ApiError, newIdempotencyKey } from './api';
 
-const SNAP_KEY = 'medikiosk.session.snapshot.v1';
-const OUTBOX_KEY = 'medikiosk.outbox.v1';
+const SNAP_KEY = 'niramaya.session.snapshot.v1';
+const OUTBOX_KEY = 'niramaya.outbox.v1';
 
 export type OutboxOp =
   | { kind: 'answer'; key: string; sessionId: string; questionId: string; category: string; answerText: string; audioBase64?: string | null }
@@ -100,14 +100,39 @@ let processing = false;
 let syncState: 'idle' | 'syncing' = 'idle';
 const listeners = new Set<() => void>();
 
+// Cached snapshot: useSyncExternalStore requires getSnapshot to return a
+// cached value when nothing changed, otherwise React infinite-loops (blank
+// /kiosk, /navigator, /doctor pages). Only allocate a new object on change.
+let cachedOutboxSnap: { pending: number; syncing: boolean } = { pending: 0, syncing: false };
+
+function getOutboxSnapshot(): { pending: number; syncing: boolean } {
+  const next = { pending: outboxCount(), syncing: syncState === 'syncing' };
+  if (
+    cachedOutboxSnap.pending === next.pending &&
+    cachedOutboxSnap.syncing === next.syncing
+  ) {
+    return cachedOutboxSnap;
+  }
+  cachedOutboxSnap = next;
+  return next;
+}
+
+function subscribeOutbox(cb: () => void): () => void {
+  listeners.add(cb);
+  return () => {
+    listeners.delete(cb);
+  };
+}
+
 function notifyOutbox(): void {
   listeners.forEach(l => l());
 }
 
 export function useOutboxPending(): { pending: number; syncing: boolean } {
   return useSyncExternalStore(
-    (cb) => { listeners.add(cb); return () => { listeners.delete(cb); }; },
-    () => ({ pending: outboxCount(), syncing: syncState === 'syncing' }),
+    subscribeOutbox,
+    getOutboxSnapshot,
+    getOutboxSnapshot,
   );
 }
 

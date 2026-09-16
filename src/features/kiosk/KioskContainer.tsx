@@ -604,7 +604,7 @@ export const KioskContainer: React.FC = () => {
               <Activity className="w-4.5 h-4.5 w-5 h-5 text-white" />
             </div>
             <div>
-              <div className="text-[15px] font-semibold text-slate-900 leading-tight">MediKiosk</div>
+              <div className="text-[15px] font-semibold text-slate-900 leading-tight">Niramaya</div>
               <div className="text-xs text-slate-500">OPD intake · {lang.toUpperCase()}</div>
             </div>
           </div>

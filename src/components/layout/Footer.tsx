@@ -12,7 +12,7 @@ export const Footer: React.FC = () => {
               <div className="w-8 h-8 rounded-lg bg-teal-700 flex items-center justify-center">
                 <Activity className="w-4 h-4 text-white" aria-hidden />
               </div>
-              <span className="font-semibold text-slate-900">MediKiosk</span>
+              <span className="font-semibold text-slate-900">Niramaya</span>
             </div>
             <p className="text-slate-600 text-sm leading-relaxed max-w-md">
               AI-assisted clinical intake for hospital OPDs. Structured history-taking,
@@ -46,7 +46,7 @@ export const Footer: React.FC = () => {
         </div>
 
         <div className="border-t border-slate-200 pt-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs text-slate-500">
-          <p>© {new Date().getFullYear()} MediKiosk · Clinical intake prototype</p>
+          <p>© {new Date().getFullYear()} Niramaya · Clinical intake prototype</p>
           <p>For hospital evaluation use. Patient data handling per institutional policy.</p>
         </div>
       </div>

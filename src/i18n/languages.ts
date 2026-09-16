@@ -15,7 +15,7 @@ export const LANGUAGES: LanguageOption[] = [
 
 export const UI_STRINGS: Record<string, Record<string, string>> = {
   en: {
-    welcome: "Welcome to MediKiosk",
+    welcome: "Welcome to Niramaya",
     subtitle: "AI-Powered Multilingual Patient Intake Kiosk",
     selectLanguage: "Select Your Language",
     continue: "Continue",
@@ -23,7 +23,7 @@ export const UI_STRINGS: Record<string, Record<string, string>> = {
     abhaTitle: "Patient Identification",
     abhaSubtitle: "Enter ABHA ID, Aadhaar, or Register as New Patient",
     consentTitle: "Patient Information & Audio Consent",
-    consentText: "MediKiosk collects your medical symptoms, past conditions, and prescriptions to assist your consulting physician. Your data is protected under Ayushman Bharat digital privacy standards.",
+    consentText: "Niramaya collects your medical symptoms, past conditions, and prescriptions to assist your consulting physician. Your data is protected under Ayushman Bharat digital privacy standards.",
     agree: "I Agree & Begin",
     decline: "Decline",
     readAloud: "Listen Audio",
@@ -46,7 +46,7 @@ export const UI_STRINGS: Record<string, Record<string, string>> = {
     needHelp: "Need Staff Assistance?",
   },
   hi: {
-    welcome: "मेडीकियोस्क में आपका स्वागत है",
+    welcome: "निरामया में आपका स्वागत है",
     subtitle: "एआई-संचालित बहुभाषी मरीज प्रवेश कियोस्क",
     selectLanguage: "अपनी भाषा चुनें",
     continue: "आगे बढ़ें",
@@ -54,7 +54,7 @@ export const UI_STRINGS: Record<string, Record<string, string>> = {
     abhaTitle: "मरीज की पहचान (आभा आईडी)",
     abhaSubtitle: "अपनी आभा आईडी, आधार नंबर दर्ज करें या नया पंजीकरण करें",
     consentTitle: "मरीज सहमति एवं सूचना",
-    consentText: "मेडीकियोस्क आपके लक्षणों, पुरानी बीमारियों और पर्चियों की जानकारी एकत्र करता है ताकि आपके डॉक्टर को परामर्श में सहायता मिल सके। आपका डेटा पूरी तरह सुरक्षित है।",
+    consentText: "निरामया आपके लक्षणों, पुरानी बीमारियों और पर्चियों की जानकारी एकत्र करता है ताकि आपके डॉक्टर को परामर्श में सहायता मिल सके। आपका डेटा पूरी तरह सुरक्षित है।",
     agree: "मैं सहमत हूं और शुरू करें",
     decline: "अस्वीकार करें",
     readAloud: "आवाज में सुनें",

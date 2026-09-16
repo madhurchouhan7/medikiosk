@@ -21,11 +21,11 @@ services:
       - STT_PROVIDER=MOCK
       - OCR_PROVIDER=TESSERACT
       - FRONTEND_ORIGINS=http://localhost:3000
-      - MEDIKIOSK_DATA_FILE=/data/medikiosk_store.json
-      - MEDIKIOSK_UPLOADS=/data/uploads
+      - NIRAMAYA_DATA_FILE=/data/niramaya_store.json
+      - NIRAMAYA_UPLOADS=/data/uploads
     volumes:
       # Patient snapshots + uploaded scans survive container restarts.
-      - medikiosk-data:/data
+      - niramaya-data:/data
 
 volumes:
-  medikiosk-data:
+  niramaya-data:

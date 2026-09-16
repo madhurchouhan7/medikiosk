@@ -1,0 +1,22 @@
+# Render blueprint for the Niramaya FastAPI backend.
+# Apply via the Render dashboard: New → Blueprint → point at this repo.
+services:
+  - type: web
+    name: niramaya-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    plan: free
+    envVars:
+      - key: LLM_PROVIDER
+        value: MOCK
+      - key: STT_PROVIDER
+        value: MOCK
+      - key: OCR_PROVIDER
+        value: TESSERACT
+      # Set to your Vercel URL after the frontend is deployed, e.g.
+      # https://niramaya.vercel.app (comma-separated if more than one).
+      - key: FRONTEND_ORIGINS
+        sync: false

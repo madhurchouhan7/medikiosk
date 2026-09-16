@@ -164,7 +164,7 @@ export const DoctorDashboard: React.FC = () => {
             status: 'final',
             type: { coding: [{ system: 'http://loinc.org', code: '34133-9', display: 'Summary of episode note' }] },
             subject: { reference: `Patient/${summary.patient.id}` },
-            title: 'Clinical Intake Summary — MediKiosk',
+            title: 'Clinical Intake Summary — Niramaya',
             section: [
               { title: 'Chief Complaint', text: { div: summary.chief_complaint } },
               { title: 'History of Present Illness', text: { div: summary.hpi_summary } },

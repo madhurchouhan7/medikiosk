@@ -35,7 +35,7 @@ app.include_router(health.router, prefix=settings.API_V1_STR)
 @app.get("/")
 async def root():
     return {
-        "message": "Welcome to MediKiosk API",
+        "message": "Welcome to Niramaya API",
         "docs": "/docs",
         "health": f"{settings.API_V1_STR}/health"
     }
