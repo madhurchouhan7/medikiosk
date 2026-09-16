@@ -9,7 +9,34 @@ import type {
   ClinicalSummary, OperationalMetrics,
 } from '../types';
 
-const API_BASE = `${(import.meta.env.MY_VITE_API_URL as string | undefined ?? '').replace(/\/$/, '')}/api`;
+const RAW_API_URL =
+  (import.meta.env.VITE_API_URL as string | undefined) ??
+  (import.meta.env.MY_VITE_API_URL as string | undefined) ??
+  '';
+
+function normalizeBaseUrl(raw: string): string {
+  // Accept with/without trailing slash, with/without a trailing "/api".
+  let base = raw.trim().replace(/\/+$/, '');
+  if (/\/api$/i.test(base)) base = base.slice(0, -4);
+  return base;
+}
+
+const API_ROOT = normalizeBaseUrl(RAW_API_URL);
+const API_BASE = `${API_ROOT}/api`;
+
+if (!API_ROOT) {
+  // Fail LOUD in the browser console: without a backend URL the production
+  // build silently targets same-origin /api (no proxy in prod, unlike `vite`
+  // dev), so session POSTs never reach the backend. Set VITE_API_URL
+  // (preferred) or MY_VITE_API_URL at build time and rebuild.
+  console.error(
+    '[API] No backend URL configured. Set VITE_API_URL (or MY_VITE_API_URL) ' +
+    'in the hosting environment and rebuild. Falling back to same-origin /api, ' +
+    'which has no backend in production.',
+  );
+} else {
+  console.log(`[DIAG] API_BASE resolved to: ${API_BASE}`);
+}
 
 export class ApiError extends Error {
   status: number;
@@ -28,6 +55,7 @@ function isOfflineError(e: unknown): boolean {
 
 async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
   let res: Response;
+  console.log(`[DIAG] API_REQUEST_ABOUT_TO_START: ${options?.method || 'GET'} ${API_BASE + url}`);
   try {
     res = await fetch(API_BASE + url, {
       ...options,
@@ -97,6 +125,7 @@ export const ApiService = {
   },
 
   async createSession(language: string, abhaId?: string, patientName?: string, patientAge?: number, patientGender?: string, patientPhone?: string): Promise<SessionPayload> {
+    console.log('[DIAG] CREATE_SESSION_CALLED', { language, hasAbhaId: !!abhaId });
     return apiFetch(`/sessions`, {
       method: 'POST',
       body: JSON.stringify({

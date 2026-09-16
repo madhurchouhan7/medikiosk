@@ -170,10 +170,12 @@ export const KioskContainer: React.FC = () => {
   };
 
   const handleAbhaLookup = async () => {
+    console.log('[DIAG] HANDLER_STARTED: handleAbhaLookup');
     if (!abhaInput.trim()) {
       addToast('warning', 'Please enter your ABHA ID');
       return;
     }
+    console.log('[DIAG] VALIDATION_PASSED: handleAbhaLookup');
     setAbhaLookupLoading(true);
     try {
       const result = await ApiService.lookupABHA(abhaInput.trim());
@@ -200,7 +202,12 @@ export const KioskContainer: React.FC = () => {
     }
   };
 
+  const [sessionStarting, setSessionStarting] = useState(false);
+
   const handleSkipAbha = async () => {
+    console.log('[DIAG] HANDLER_STARTED: handleSkipAbha (walk-in path has no validation gate)');
+    if (sessionStarting) return;
+    setSessionStarting(true);
     try {
       const session = await ApiService.createSession(lang);
       setSessionId(session.id);
@@ -208,14 +215,18 @@ export const KioskContainer: React.FC = () => {
       setStep('consent');
     } catch (e) {
       addToast('error', e instanceof ApiError ? e.message : 'Could not start a session. Check the connection and try again.');
+    } finally {
+      setSessionStarting(false);
     }
   };
 
   const handleCreateAbha = async () => {
+    console.log('[DIAG] HANDLER_STARTED: handleCreateAbha');
     if (!newName || !newAge || !newPhone) {
       addToast('warning', 'Please fill in name, age, and phone number');
       return;
     }
+    console.log('[DIAG] VALIDATION_PASSED: handleCreateAbha');
     setAbhaLookupLoading(true);
     try {
       const result = await ApiService.createABHA(newName, parseInt(newAge), newGender, newPhone, newDob);
@@ -233,10 +244,12 @@ export const KioskContainer: React.FC = () => {
   };
 
   const handleConsent = async () => {
+    console.log('[DIAG] HANDLER_STARTED: handleConsent', { hasSessionId: !!sessionId });
     if (!sessionId) {
       addToast('error', 'Session not ready. Please identify the patient first.');
       return;
     }
+    console.log('[DIAG] VALIDATION_PASSED: handleConsent');
     answeredIdsRef.current = [];
     setStep('interview');
     try {
@@ -706,8 +719,8 @@ export const KioskContainer: React.FC = () => {
                       <span className="text-sm text-slate-500">नया पंजीकरण करें</span>
                     </button>
                   </div>
-                  <button onClick={handleSkipAbha} className="w-full min-h-[52px] py-3 rounded-lg text-slate-600 hover:text-slate-900 text-[15px] font-medium border border-transparent hover:border-slate-200">
-                    Skip — continue as walk-in patient →
+                  <button onClick={() => { console.log('[DIAG] BUTTON_CLICKED: skip-walk-in'); void handleSkipAbha(); }} disabled={sessionStarting} className="w-full min-h-[52px] py-3 rounded-lg text-slate-600 hover:text-slate-900 text-[15px] font-medium border border-transparent hover:border-slate-200 disabled:opacity-60">
+                    {sessionStarting ? 'Starting session…' : 'Skip — continue as walk-in patient →'}
                   </button>
                 </div>
               )}
@@ -727,7 +740,7 @@ export const KioskContainer: React.FC = () => {
                         className="clinical-input flex-1 px-4 py-3.5 min-h-[56px] font-mono text-lg"
                       />
                       <button
-                        onClick={handleAbhaLookup}
+                        onClick={() => { console.log('[DIAG] BUTTON_CLICKED: abha-find'); void handleAbhaLookup(); }}
                         disabled={abhaLookupLoading}
                         className="btn-primary px-6 min-h-[56px] inline-flex items-center justify-center gap-2"
                       >
@@ -772,7 +785,7 @@ export const KioskContainer: React.FC = () => {
                   </div>
                   <div className="flex gap-2">
                     <button onClick={() => setAbhaMode('unknown')} className="btn-secondary px-4 py-3 min-h-[52px] text-sm">← Back</button>
-                    <button onClick={handleCreateAbha} disabled={abhaLookupLoading} className="btn-primary flex-1 py-3 min-h-[52px] inline-flex items-center justify-center gap-2">
+                    <button onClick={() => { console.log('[DIAG] BUTTON_CLICKED: abha-create'); void handleCreateAbha(); }} disabled={abhaLookupLoading} className="btn-primary flex-1 py-3 min-h-[52px] inline-flex items-center justify-center gap-2">
                       {abhaLookupLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
                       {abhaLookupLoading ? 'Creating…' : 'Create ABHA ID and continue'}
                     </button>
@@ -859,7 +872,7 @@ export const KioskContainer: React.FC = () => {
                   <Volume2 className="w-4 h-4" />
                   {strings.readAloud}
                 </button>
-                <button onClick={handleConsent} className="btn-primary flex-1 py-3.5 min-h-[56px] inline-flex items-center justify-center gap-2 text-base">
+                <button onClick={() => { console.log('[DIAG] BUTTON_CLICKED: consent-agree'); void handleConsent(); }} className="btn-primary flex-1 py-3.5 min-h-[56px] inline-flex items-center justify-center gap-2 text-base">
                   <Check className="w-5 h-5" />
                   {strings.agree}
                 </button>
