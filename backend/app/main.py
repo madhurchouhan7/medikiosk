@@ -14,8 +14,10 @@ app = FastAPI(
 # CORS: explicit frontend origin(s) only. Wildcard + credentials was both
 # invalid and over-permissive.
 _frontend_origins = [
-    o.strip() for o in os.getenv("FRONTEND_ORIGINS", "http://localhost:3000").split(",") if o.strip()
+    o.strip().rstrip("/") for o in os.getenv("FRONTEND_ORIGINS", "http://localhost:3000").split(",") if o.strip().rstrip("/")
 ]
+# Visible in Render logs on every boot so a stale/mistyped value is obvious.
+print(f"[CORS] allow_origins={_frontend_origins}")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_frontend_origins,

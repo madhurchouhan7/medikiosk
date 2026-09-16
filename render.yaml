@@ -16,7 +16,10 @@ services:
         value: MOCK
       - key: OCR_PROVIDER
         value: TESSERACT
-      # Set to your Vercel URL after the frontend is deployed, e.g.
-      # https://niramaya.vercel.app (comma-separated if more than one).
+      # Set to your Vercel URL(s) after the frontend is deployed, e.g.
+      # https://medikiosk-chi-one.vercel.app,https://medikiosk.vercel.app
+      # (comma-separated, no trailing slash). Render reads this at boot:
+      # changing it requires a redeploy. Check the [CORS] line in Logs
+      # to confirm what the running process loaded.
       - key: FRONTEND_ORIGINS
         sync: false
