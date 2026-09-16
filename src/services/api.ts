@@ -10,8 +10,9 @@ import type {
 } from '../types';
 
 const RAW_API_URL =
-  (import.meta.env.VITE_API_URL as string | undefined) ??
+  (import.meta.env.NIRAMAYA_API_URL as string | undefined) ??
   (import.meta.env.MY_VITE_API_URL as string | undefined) ??
+  (import.meta.env.VITE_API_URL as string | undefined) ??
   '';
 
 function normalizeBaseUrl(raw: string): string {
@@ -27,10 +28,11 @@ const API_BASE = `${API_ROOT}/api`;
 if (!API_ROOT) {
   // Fail LOUD in the browser console: without a backend URL the production
   // build silently targets same-origin /api (no proxy in prod, unlike `vite`
-  // dev), so session POSTs never reach the backend. Set VITE_API_URL
-  // (preferred) or MY_VITE_API_URL at build time and rebuild.
+  // dev), so session POSTs never reach the backend. Set NIRAMAYA_API_URL
+  // (Vercel-safe, preferred), MY_VITE_API_URL, or VITE_API_URL at build
+  // time and rebuild.
   console.error(
-    '[API] No backend URL configured. Set VITE_API_URL (or MY_VITE_API_URL) ' +
+    '[API] No backend URL configured. Set NIRAMAYA_API_URL (or MY_VITE_API_URL) ' +
     'in the hosting environment and rebuild. Falling back to same-origin /api, ' +
     'which has no backend in production.',
   );
