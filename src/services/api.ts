@@ -10,9 +10,9 @@ import type {
 } from '../types';
 
 const CONFIGURED_API_URL =
-  (import.meta.env.VITE_API_URL as string | undefined) ??
   (import.meta.env.NIRAMAYA_API_URL as string | undefined) ??
   (import.meta.env.MY_VITE_API_URL as string | undefined) ??
+  (import.meta.env.VITE_API_URL as string | undefined) ??
   '';
 
 function normalizeBaseUrl(raw: string): string {
@@ -31,11 +31,10 @@ const API_BASE = API_ROOT ? `${API_ROOT}/api` : '/api';
 if (!API_ROOT) {
   if (import.meta.env.PROD) {
     // Fail LOUD: firing a same-origin /api request in production only
-    // produces a misleading 405 from the static host. Set VITE_API_URL
-    // (preferred), NIRAMAYA_API_URL, or MY_VITE_API_URL at build time
-    // and redeploy — Vite bakes env vars in at build time.
+    // produces a misleading 405 from the static host. Set NIRAMAYA_API_URL
+    // at build time and redeploy — Vite bakes env vars in at build time.
     console.error(
-      '[API] No backend URL configured for production. Set VITE_API_URL ' +
+      '[API] No backend URL configured for production. Set NIRAMAYA_API_URL ' +
       '(e.g. https://medikiosk-5vjw.onrender.com) in the hosting environment ' +
       'and trigger a NEW deployment. No request will be sent.',
     );
@@ -50,7 +49,7 @@ if (!API_ROOT) {
 function assertBackendConfigured(): void {
   if (!API_ROOT && import.meta.env.PROD) {
     throw new ApiError(
-      'Backend not configured. Set VITE_API_URL and redeploy.',
+      'Backend not configured. Set NIRAMAYA_API_URL and redeploy.',
       0,
       false,
     );
