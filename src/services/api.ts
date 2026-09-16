@@ -9,10 +9,10 @@ import type {
   ClinicalSummary, OperationalMetrics,
 } from '../types';
 
-const RAW_API_URL =
+const CONFIGURED_API_URL =
+  (import.meta.env.VITE_API_URL as string | undefined) ??
   (import.meta.env.NIRAMAYA_API_URL as string | undefined) ??
   (import.meta.env.MY_VITE_API_URL as string | undefined) ??
-  (import.meta.env.VITE_API_URL as string | undefined) ??
   '';
 
 function normalizeBaseUrl(raw: string): string {
@@ -22,22 +22,39 @@ function normalizeBaseUrl(raw: string): string {
   return base;
 }
 
-const API_ROOT = normalizeBaseUrl(RAW_API_URL);
-const API_BASE = `${API_ROOT}/api`;
+const API_ROOT = normalizeBaseUrl(CONFIGURED_API_URL);
+// Local `vite` dev serves a same-origin /api proxy (see vite.config.ts).
+// Production has no same-origin backend, so production MUST resolve to the
+// configured Render URL — never a relative fallback.
+const API_BASE = API_ROOT ? `${API_ROOT}/api` : '/api';
 
 if (!API_ROOT) {
-  // Fail LOUD in the browser console: without a backend URL the production
-  // build silently targets same-origin /api (no proxy in prod, unlike `vite`
-  // dev), so session POSTs never reach the backend. Set NIRAMAYA_API_URL
-  // (Vercel-safe, preferred), MY_VITE_API_URL, or VITE_API_URL at build
-  // time and rebuild.
-  console.error(
-    '[API] No backend URL configured. Set NIRAMAYA_API_URL (or MY_VITE_API_URL) ' +
-    'in the hosting environment and rebuild. Falling back to same-origin /api, ' +
-    'which has no backend in production.',
-  );
+  if (import.meta.env.PROD) {
+    // Fail LOUD: firing a same-origin /api request in production only
+    // produces a misleading 405 from the static host. Set VITE_API_URL
+    // (preferred), NIRAMAYA_API_URL, or MY_VITE_API_URL at build time
+    // and redeploy — Vite bakes env vars in at build time.
+    console.error(
+      '[API] No backend URL configured for production. Set VITE_API_URL ' +
+      '(e.g. https://medikiosk-5vjw.onrender.com) in the hosting environment ' +
+      'and trigger a NEW deployment. No request will be sent.',
+    );
+  } else {
+    console.log('[DIAG] API_BASE: no URL configured, using local dev proxy /api');
+  }
 } else {
   console.log(`[DIAG] API_BASE resolved to: ${API_BASE}`);
+}
+
+/** Production must never fire a same-origin fallback request. */
+function assertBackendConfigured(): void {
+  if (!API_ROOT && import.meta.env.PROD) {
+    throw new ApiError(
+      'Backend not configured. Set VITE_API_URL and redeploy.',
+      0,
+      false,
+    );
+  }
 }
 
 export class ApiError extends Error {
@@ -57,6 +74,7 @@ function isOfflineError(e: unknown): boolean {
 
 async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
   let res: Response;
+  assertBackendConfigured();
   console.log(`[DIAG] API_REQUEST_ABOUT_TO_START: ${options?.method || 'GET'} ${API_BASE + url}`);
   try {
     res = await fetch(API_BASE + url, {
@@ -168,6 +186,7 @@ export const ApiService = {
   },
 
   async processDocument(sessionId: string, docType: string, file: File, idempotencyKey?: string): Promise<DocumentResult> {
+    assertBackendConfigured();
     const formData = new FormData();
     formData.append('session_id', sessionId);
     formData.append('doc_type', docType);
