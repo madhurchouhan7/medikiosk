@@ -7,12 +7,15 @@ router = APIRouter(prefix="/sessions", tags=["Sessions"])
 
 @router.post("", response_model=Session)
 async def create_session(payload: SessionCreate):
+    # Reuse the registered ABHA patient when known so demographics survive.
+    known = db_store.abha_registry.get(payload.abha_id) if payload.abha_id else None
     patient = Patient(
-        name="Walk-in Patient",
-        age=45,
-        gender="Male",
-        abha_id=payload.abha_id or "91-9988-1122-3344",
-        language_preference=payload.language
+        name=payload.patient_name or (known.name if known else "Walk-in Patient"),
+        age=payload.patient_age or (known.age if known else 0),
+        gender=payload.patient_gender or (known.gender if known else "Not specified"),
+        abha_id=payload.abha_id or (known.abha_id if known else "WALK-IN"),
+        language_preference=payload.language,
+        phone=payload.patient_phone or (known.phone if known else None),
     )
     session = Session(
         patient_id=patient.id,
@@ -26,7 +29,8 @@ async def create_session(payload: SessionCreate):
     db_store.sessions[session.id] = session
     db_store.responses[session.id] = []
     db_store.documents[session.id] = []
-    db_store.log_audit(session.id, "Session initiated", "Patient Kiosk #3", "PATIENT_REPORTED", f"Language: {payload.language}")
+    db_store.log_audit(session.id, "Session initiated", "Patient Kiosk", "PATIENT_REPORTED", f"Language: {payload.language}")
+    db_store.save()
     return session
 
 @router.get("", response_model=List[Session])
@@ -77,6 +81,7 @@ async def create_abha_id(name: str, age: int, gender: str, phone: str, dob: str)
     )
     db_store.abha_registry[abha_id] = patient
     db_store.log_audit("system", f"New ABHA ID created: {abha_id}", "ABHA Registration", "PATIENT_REPORTED", f"Patient: {name}")
+    db_store.save()
     return {"abha_id": abha_id, "patient": patient, "message": "ABHA ID created successfully"}
 
 @router.get("/metrics/operational", response_model=OperationalMetrics)
@@ -97,6 +102,7 @@ async def get_session(session_id: str):
 async def update_demo_stage(session_id: str, stage: int):
     if session_id in db_store.sessions:
         db_store.sessions[session_id].demo_stage = stage
+        db_store.save()
         return {"session_id": session_id, "demo_stage": stage}
     raise HTTPException(status_code=404, detail="Session not found")
 
@@ -105,4 +111,5 @@ async def reset_session(session_id: str):
     if session_id in db_store.sessions:
         db_store.sessions[session_id].status = "COMPLETED"
         db_store.log_audit(session_id, "Session completed & kiosk reset", "Kiosk Watchdog", "SYSTEM_AUDIT", "Screen returned to welcome state")
+        db_store.save()
     return {"message": "Session reset successfully"}

@@ -5,3 +5,9 @@ pydantic-settings>=2.2.0
 python-multipart>=0.0.9
 pytest>=8.0.0
 httpx>=0.27.0
+Pillow>=10.0.0
+pytesseract>=0.3.10
+# NOTE: pytesseract needs the Tesseract OCR binary on the host.
+# Docker image installs it via apt (see backend/Dockerfile).
+# Without the binary, uploads are stored and routed to human
+# transcription — extraction is never fabricated.

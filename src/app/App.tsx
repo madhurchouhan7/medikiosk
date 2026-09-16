@@ -7,7 +7,7 @@ import { AppRoutes } from './routes';
 export const App: React.FC = () => {
   return (
     <BrowserRouter>
-      <div className="flex flex-col min-h-screen bg-[#0f1117] text-slate-100 selection:bg-teal-500 selection:text-white">
+      <div className="flex flex-col min-h-screen bg-slate-50 text-slate-900">
         <Navbar />
         <main className="flex-1">
           <AppRoutes />

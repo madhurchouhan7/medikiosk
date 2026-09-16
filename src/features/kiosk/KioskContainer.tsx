@@ -1,15 +1,20 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Globe2, Mic, MicOff, Volume2, Check, X, ArrowRight,
-  HelpCircle, Camera, FileText, AlertTriangle, CheckCircle2,
-  ShieldCheck, Activity, AlertOctagon, ChevronRight, Upload,
-  Search, UserPlus, Heart, RefreshCw, VolumeX, Loader2,
-  File as FileIcon, Eye, Trash2, Clock
+  HelpCircle, FileText, AlertTriangle, CheckCircle2,
+  ShieldCheck, Activity, AlertOctagon, Upload,
+  Search, UserPlus, Loader2,
+  File as FileIcon, Clock
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { LANGUAGES, UI_STRINGS } from '../../i18n/languages';
 import type { LanguageCode, Question, ExtractedEntity, Patient } from '../../types';
-import { ApiService } from '../../services/api';
+import { ApiService, ApiError, newIdempotencyKey } from '../../services/api';
+import {
+  saveSnapshot, loadSnapshot, clearSnapshot, enqueueOp,
+  fileToBase64, processOutbox, useOnlineStatus,
+} from '../../services/offline';
+import { nextLocalQuestion } from '../../services/localInterview';
 import { useVoiceRecorder } from '../../hooks/useVoiceRecorder';
 import { useTTS, useSTT } from '../../hooks/useSpeech';
 
@@ -33,25 +38,36 @@ interface Toast {
   message: string;
 }
 
-// ─── Mini Toast Component ─────────────────────────────────────────────────────
+const STEP_ORDER: KioskStep[] = ['language', 'abha', 'consent', 'interview', 'documents', 'review', 'complete'];
+const STEP_LABELS: Record<string, string> = {
+  language: 'Language', abha: 'Identity', abha_create: 'Identity', consent: 'Consent',
+  abha_records: 'Records', interview: 'Questions', documents: 'Documents', review: 'Review', complete: 'Done',
+};
+
+function stepIndex(step: KioskStep): number {
+  if (step === 'abha_create' || step === 'abha_records') return 1;
+  return STEP_ORDER.indexOf(step);
+}
+
+// ─── Toast (light, clinical) ──────────────────────────────────────────────────
 function ToastContainer({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id: string) => void }) {
   return (
-    <div className="fixed top-4 right-4 z-50 space-y-2 pointer-events-none">
+    <div className="fixed top-4 right-4 z-50 space-y-2" role="status" aria-live="polite">
       {toasts.map(t => (
         <div
           key={t.id}
-          className={`flex items-center gap-3 px-4 py-3 rounded-xl shadow-xl text-sm font-medium pointer-events-auto max-w-sm
-            ${t.type === 'success' ? 'bg-emerald-600 text-white' :
-              t.type === 'error' ? 'bg-red-600 text-white' :
-              t.type === 'warning' ? 'bg-amber-500 text-slate-900' :
-              'bg-slate-700 text-white'}`}
+          className={`flex items-start gap-2.5 px-4 py-3 rounded-lg shadow-raised border text-sm max-w-sm bg-white
+            ${t.type === 'success' ? 'border-slate-200 border-l-4 border-l-emerald-600 text-slate-800' :
+              t.type === 'error' ? 'border-slate-200 border-l-4 border-l-red-600 text-slate-800' :
+              t.type === 'warning' ? 'border-slate-200 border-l-4 border-l-amber-500 text-slate-800' :
+              'border-slate-200 border-l-4 border-l-teal-700 text-slate-800'}`}
         >
-          {t.type === 'success' && <CheckCircle2 className="w-4 h-4 shrink-0" />}
-          {t.type === 'error' && <X className="w-4 h-4 shrink-0" />}
-          {t.type === 'warning' && <AlertTriangle className="w-4 h-4 shrink-0" />}
-          {t.type === 'info' && <Activity className="w-4 h-4 shrink-0" />}
-          <span>{t.message}</span>
-          <button onClick={() => onDismiss(t.id)} className="ml-auto opacity-70 hover:opacity-100">
+          {t.type === 'success' && <CheckCircle2 className="w-4 h-4 mt-0.5 text-emerald-700 shrink-0" />}
+          {t.type === 'error' && <X className="w-4 h-4 mt-0.5 text-red-700 shrink-0" />}
+          {t.type === 'warning' && <AlertTriangle className="w-4 h-4 mt-0.5 text-amber-600 shrink-0" />}
+          {t.type === 'info' && <Activity className="w-4 h-4 mt-0.5 text-teal-700 shrink-0" />}
+          <span className="flex-1 leading-snug">{t.message}</span>
+          <button onClick={() => onDismiss(t.id)} className="text-slate-400 hover:text-slate-700" aria-label="Dismiss notification">
             <X className="w-3.5 h-3.5" />
           </button>
         </div>
@@ -60,9 +76,38 @@ function ToastContainer({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id
   );
 }
 
+// ─── Progress indicator ───────────────────────────────────────────────────────
+function KioskProgress({ step }: { step: KioskStep }) {
+  const idx = stepIndex(step);
+  return (
+    <nav aria-label="Intake progress" className="w-full">
+      <ol className="flex items-center gap-1.5 sm:gap-2">
+        {STEP_ORDER.map((s, i) => (
+          <li key={s} className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5">
+              <span
+                className={`w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-semibold shrink-0 border
+                  ${i < idx ? 'bg-teal-700 border-teal-700 text-white' :
+                    i === idx ? 'bg-white border-teal-700 text-teal-700 border-2' :
+                    'bg-white border-slate-300 text-slate-400'}`}
+                aria-current={i === idx ? 'step' : undefined}
+              >
+                {i < idx ? <Check className="w-3.5 h-3.5" /> : i + 1}
+              </span>
+              <span className={`hidden md:block text-xs truncate ${i === idx ? 'font-semibold text-slate-900' : 'text-slate-500'}`}>
+                {STEP_LABELS[s]}
+              </span>
+            </div>
+            <div className={`h-1 rounded-full mt-1.5 ${i <= idx ? 'bg-teal-700' : 'bg-slate-200'}`} />
+          </li>
+        ))}
+      </ol>
+    </nav>
+  );
+}
+
 // ─── KioskContainer ───────────────────────────────────────────────────────────
 export const KioskContainer: React.FC = () => {
-  // ── Core State ──────────────────────────────────────────────────────────────
   const [step, setStep] = useState<KioskStep>('language');
   const [lang, setLang] = useState<LanguageCode>('hi');
   const [sessionId, setSessionId] = useState<string>('');
@@ -70,19 +115,16 @@ export const KioskContainer: React.FC = () => {
   const [assistanceScore, setAssistanceScore] = useState<number>(1.0);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  // ── ABHA State ──────────────────────────────────────────────────────────────
   const [abhaMode, setAbhaMode] = useState<'unknown' | 'have' | 'create'>('unknown');
   const [abhaInput, setAbhaInput] = useState('');
   const [abhaLookupLoading, setAbhaLookupLoading] = useState(false);
   const [abhaRecords, setAbhaRecords] = useState<AbhaRecord[]>([]);
-  // ABHA Create form
   const [newName, setNewName] = useState('');
   const [newAge, setNewAge] = useState('');
   const [newGender, setNewGender] = useState('Male');
   const [newPhone, setNewPhone] = useState('');
   const [newDob, setNewDob] = useState('');
 
-  // ── Interview State ─────────────────────────────────────────────────────────
   const [speechState, setSpeechState] = useState<SpeechState>('IDLE');
   const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null);
   const [interviewHistory, setInterviewHistory] = useState<Array<{ q: string; a: string; category: string; confidence?: number }>>([]);
@@ -91,7 +133,6 @@ export const KioskContainer: React.FC = () => {
   const micTimerRef = useRef<any>(null);
   const [ttsActive, setTtsActive] = useState(false);
 
-  // ── Document State ──────────────────────────────────────────────────────────
   const [ocrProcessing, setOcrProcessing] = useState(false);
   const [extractedEntities, setExtractedEntities] = useState<ExtractedEntity[]>([]);
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
@@ -100,16 +141,13 @@ export const KioskContainer: React.FC = () => {
   const [ocrRawText, setOcrRawText] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ── Complete State ──────────────────────────────────────────────────────────
   const [resetCountdown, setResetCountdown] = useState(15);
 
-  // ── Hooks ───────────────────────────────────────────────────────────────────
   const recorder = useVoiceRecorder();
   const tts = useTTS();
   const stt = useSTT();
   const strings = UI_STRINGS[lang] || UI_STRINGS['en'];
 
-  // ── Toast helpers ───────────────────────────────────────────────────────────
   const addToast = useCallback((type: Toast['type'], message: string, duration = 4000) => {
     const id = `toast-${Date.now()}`;
     setToasts(prev => [...prev, { id, type, message }]);
@@ -120,20 +158,17 @@ export const KioskContainer: React.FC = () => {
     setToasts(prev => prev.filter(t => t.id !== id));
   }, []);
 
-  // ── TTS helper: read question aloud ─────────────────────────────────────────
   const readQuestionAloud = useCallback((question: Question) => {
     const text = question.text[lang] || question.text['en'];
     setTtsActive(true);
     tts.speak(text, lang, () => setTtsActive(false));
   }, [lang, tts]);
 
-  // ── Step 1: Language Selection ───────────────────────────────────────────────
   const handleSelectLanguage = (code: LanguageCode) => {
     setLang(code);
     setStep('abha');
   };
 
-  // ── Step 2: ABHA Lookup ──────────────────────────────────────────────────────
   const handleAbhaLookup = async () => {
     if (!abhaInput.trim()) {
       addToast('warning', 'Please enter your ABHA ID');
@@ -147,34 +182,35 @@ export const KioskContainer: React.FC = () => {
         if (result.abha_health_records?.length) {
           setAbhaRecords(result.abha_health_records as AbhaRecord[]);
         }
-        // Create session with found patient data
-        const session = await ApiService.createSession(lang, result.patient.abha_id, result.patient.name, result.patient.age, result.patient.gender);
+        const session = await ApiService.createSession(lang, result.patient.abha_id, result.patient.name, result.patient.age, result.patient.gender, result.patient.phone);
         setSessionId(session.id);
-        addToast('success', `Welcome back, ${result.patient.name}!`);
+        addToast('success', `Welcome back, ${result.patient.name}. Your records were found.`);
         if (result.abha_health_records?.length) {
           setStep('abha_records');
         } else {
           setStep('consent');
         }
       } else {
-        addToast('info', 'ABHA ID not found. You can create a new one or proceed as walk-in.');
+        addToast('info', 'ABHA ID not found. You can register as a new patient or continue as walk-in.');
       }
-    } catch {
-      addToast('error', 'Could not connect to ABHA portal. Please try again.');
+    } catch (e) {
+      addToast('error', e instanceof ApiError ? e.message : 'Could not reach the patient registry. Check the connection and try again.');
     } finally {
       setAbhaLookupLoading(false);
     }
   };
 
   const handleSkipAbha = async () => {
-    // Create a session without ABHA
-    const session = await ApiService.createSession(lang);
-    setSessionId(session.id);
-    setPatient(session.patient);
-    setStep('consent');
+    try {
+      const session = await ApiService.createSession(lang);
+      setSessionId(session.id);
+      setPatient(session.patient);
+      setStep('consent');
+    } catch (e) {
+      addToast('error', e instanceof ApiError ? e.message : 'Could not start a session. Check the connection and try again.');
+    }
   };
 
-  // ── Step 2b: Create ABHA ─────────────────────────────────────────────────────
   const handleCreateAbha = async () => {
     if (!newName || !newAge || !newPhone) {
       addToast('warning', 'Please fill in name, age, and phone number');
@@ -184,50 +220,59 @@ export const KioskContainer: React.FC = () => {
     try {
       const result = await ApiService.createABHA(newName, parseInt(newAge), newGender, newPhone, newDob);
       setPatient(result.patient as Patient);
-      const session = await ApiService.createSession(lang, result.abha_id, newName, parseInt(newAge), newGender);
+      const session = await ApiService.createSession(lang, result.abha_id, newName, parseInt(newAge), newGender, newPhone);
       setSessionId(session.id);
+      setPatient(session.patient);
       addToast('success', `ABHA ID created: ${result.abha_id}`);
       setStep('consent');
-    } catch {
-      addToast('error', 'Could not create ABHA ID. Please try again.');
+    } catch (e) {
+      addToast('error', e instanceof ApiError ? e.message : 'Could not create ABHA ID. Please try again.');
     } finally {
       setAbhaLookupLoading(false);
     }
   };
 
-  // ── Step 3: Consent → Start Interview ────────────────────────────────────────
   const handleConsent = async () => {
+    if (!sessionId) {
+      addToast('error', 'Session not ready. Please identify the patient first.');
+      return;
+    }
+    answeredIdsRef.current = [];
     setStep('interview');
     try {
-      const res = await ApiService.startInterview(sessionId || 'session-demo');
+      const res = await ApiService.startInterview(sessionId);
       setCurrentQuestion(res.question);
       setSpeechState('ASKING');
-      // Auto-read question after short delay
       setTimeout(() => readQuestionAloud(res.question), 500);
-    } catch {
-      addToast('error', 'Could not start interview. Please try again.');
+    } catch (e) {
+      if (e instanceof ApiError && e.offline) {
+        // Start locally; answers queue and sync later.
+        const first = nextLocalQuestion([]);
+        setCurrentQuestion(first);
+        setSpeechState('ASKING');
+        setContinuedOffline(true);
+        addToast('warning', 'Starting offline. Your answers are saved on this kiosk and will sync automatically.');
+      } else {
+        addToast('error', e instanceof ApiError ? e.message : 'Could not start the interview. Please try again.');
+      }
     }
   };
 
-  // Read consent text aloud
   const handleReadConsent = () => {
     const text = strings.consentText;
     setTtsActive(true);
     tts.speak(text, lang, () => setTtsActive(false));
   };
 
-  // ── Step 4: Voice Interview ──────────────────────────────────────────────────
   const handleStartListening = () => {
     if (recorder.isRecording || speechState === 'LISTENING') return;
     setSpeechState('LISTENING');
     setLiveTranscript('');
     setMicSeconds(0);
 
-    // Start mic timer
     micTimerRef.current = setInterval(() => {
       setMicSeconds(s => {
         if (s >= 15) {
-          // Auto-stop after 15 seconds
           handleStopListening();
           return 15;
         }
@@ -235,7 +280,6 @@ export const KioskContainer: React.FC = () => {
       });
     }, 1000);
 
-    // Try Web Speech API first for live transcript
     if (stt.isSupported) {
       stt.start(lang, (result) => {
         setLiveTranscript(result.transcript);
@@ -246,27 +290,77 @@ export const KioskContainer: React.FC = () => {
         handleStopListening(liveTranscript);
       });
     } else {
-      // Fallback: use MediaRecorder for audio capture
       recorder.startRecording();
     }
   };
 
+  const answeredIdsRef = useRef<string[]>([]);
+  const appendHistory = useCallback((question: Question, answer: string, sttConf?: number) => {
+    if (!answeredIdsRef.current.includes(question.question_id)) {
+      answeredIdsRef.current.push(question.question_id);
+    }
+    setInterviewHistory(prev => [...prev, {
+      q: question.text[lang] || question.text['en'],
+      a: answer,
+      category: question.category,
+      confidence: sttConf,
+    }]);
+  }, [lang]);
+
+  const advanceOffline = useCallback((question: Question, answer: string) => {
+    // No connection: keep the interview moving locally in category order.
+    // The answer is queued for the server; wording resyncs on reconnect.
+    appendHistory(question, answer);
+    const next = nextLocalQuestion(answeredIdsRef.current);
+    if (next) {
+      setCurrentQuestion(next);
+      setSpeechState('ASKING');
+      setTimeout(() => readQuestionAloud(next), 400);
+    } else {
+      setSpeechState('IDLE');
+      setStep('documents');
+    }
+  }, [appendHistory, readQuestionAloud]);
+
   const handleStopListening = useCallback((finalTranscript?: string, confidence?: number) => {
     clearInterval(micTimerRef.current);
     stt.stop();
+    const wasRecordingFallback = recorder.isRecording;
     if (recorder.isRecording) recorder.stopRecording();
 
-    const text = finalTranscript || liveTranscript;
-    if (text.trim()) {
-      handleAnswerSubmit(text.trim(), confidence);
+    const text = (finalTranscript || liveTranscript).trim();
+    if (text) {
+      handleAnswerSubmit(text, confidence);
+    } else if (wasRecordingFallback) {
+      // Web Speech unavailable/failed: send raw audio to the server STT.
+      // Poll briefly for the encoded clip, then submit audio-only.
+      setSpeechState('THINKING');
+      let polls = 0;
+      const timer = setInterval(() => {
+        polls += 1;
+        const clip = recorder.audioBase64;
+        if (clip || polls > 20) {
+          clearInterval(timer);
+          if (clip) {
+            handleAnswerSubmit('', undefined, clip);
+          } else {
+            setSpeechState('ASKING');
+            addToast('info', 'No speech was captured. Tap the microphone and speak, or choose an option below.');
+          }
+        }
+      }, 250);
     } else {
       setSpeechState('ASKING');
-      addToast('info', 'No speech detected. Please tap the mic and speak.');
+      addToast('info', 'No speech was heard. Tap the microphone and speak clearly, or choose an option below.');
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveTranscript, recorder, stt]);
 
-  const handleAnswerSubmit = async (answer: string, sttConf?: number) => {
-    if (!currentQuestion) return;
+  const handleAnswerSubmit = async (answer: string, sttConf?: number, audioBase64?: string | null) => {
+    if (!currentQuestion || !sessionId) {
+      addToast('error', 'Session not ready. Please go back and identify the patient first.');
+      return;
+    }
     tts.cancel();
     setTtsActive(false);
     setSpeechState('THINKING');
@@ -275,21 +369,19 @@ export const KioskContainer: React.FC = () => {
     const isChestPain = /chest pain|seene mein dard|crushing|heart pain/i.test(answer);
     if (isChestPain) setHasRedFlag(true);
 
+    const key = newIdempotencyKey();
     try {
       const res = await ApiService.submitInterviewResponse(
-        sessionId || 'session-demo',
+        sessionId,
         currentQuestion.question_id,
         currentQuestion.category,
-        answer
+        answer,
+        audioBase64,
+        key,
       );
 
       setAssistanceScore(res.assistance_score);
-      setInterviewHistory(prev => [...prev, {
-        q: currentQuestion.text[lang] || currentQuestion.text['en'],
-        a: answer,
-        category: currentQuestion.category,
-        confidence: sttConf,
-      }]);
+      appendHistory(currentQuestion, answer || '(voice recording sent for transcription)', sttConf);
 
       if (res.next_question) {
         setCurrentQuestion(res.next_question);
@@ -298,66 +390,165 @@ export const KioskContainer: React.FC = () => {
       } else {
         setSpeechState('IDLE');
         setStep('documents');
-        addToast('success', 'Interview complete! Please scan or upload your documents.');
+        addToast('success', 'Questions complete. Next: scan a prescription if you have one.');
       }
-    } catch {
-      setSpeechState('ASKING');
-      addToast('error', 'Error processing response. Please try again.');
+    } catch (e) {
+      if (e instanceof ApiError && e.offline) {
+        enqueueOp({
+          kind: 'answer', key, sessionId,
+          questionId: currentQuestion.question_id,
+          category: currentQuestion.category,
+          answerText: answer, audioBase64,
+        });
+        setContinuedOffline(true);
+        addToast('warning', 'Connection lost. Your answer is saved on this kiosk and will sync automatically — please continue.');
+        advanceOffline(currentQuestion, answer || '(voice answer saved, pending transcription)');
+      } else {
+        setSpeechState('ASKING');
+        addToast('error', e instanceof ApiError ? e.message : 'That answer could not be saved. Please try again.');
+      }
     }
   };
 
-  // ── Step 5: Document Scanner ─────────────────────────────────────────────────
   const handleFileUpload = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
+    if (!sessionId) {
+      addToast('error', 'Session not ready. Please identify the patient first.');
+      return;
+    }
     const file = files[0];
     setUploadedFiles(prev => [...prev, file]);
     setOcrProcessing(true);
-    addToast('info', 'Processing document...');
+    addToast('info', 'Reading your document. This usually takes a few seconds.');
 
+    const key = newIdempotencyKey();
     try {
-      const res = await ApiService.processDocument(sessionId || 'session-demo', 'PRESCRIPTION', file);
+      const res = await ApiService.processDocument(sessionId, 'PRESCRIPTION', file, key);
       setExtractedEntities(res.entities || []);
       setIsLowConf(res.requires_verification || false);
       setAssistanceScore(res.assistance_score || 1.0);
       setOcrRawText(res.raw_text || '');
 
       if (res.requires_verification) {
-        addToast('warning', 'Low OCR confidence detected — task sent to human reviewer');
+        if ((res.entities || []).length === 0 && !res.raw_text) {
+          addToast('warning', 'The scan is saved. A staff member will read it from the original image — you can continue.');
+        } else {
+          addToast('warning', 'The scan was unclear, so a staff member will verify it. You can continue.');
+        }
       } else {
-        addToast('success', `Extracted ${res.entities?.length || 0} medication(s) with ${Math.round(res.overall_confidence * 100)}% confidence`);
+        addToast('success', `Found ${res.entities?.length || 0} medicine(s) at ${Math.round((res.overall_confidence || 0) * 100)}% confidence.`);
       }
       setStep('review');
-    } catch {
-      addToast('error', 'Document processing failed. Please try again.');
+    } catch (e) {
+      if (e instanceof ApiError && e.offline) {
+        try {
+          const b64 = await fileToBase64(file);
+          enqueueOp({
+            kind: 'document', key, sessionId, docType: 'PRESCRIPTION',
+            fileName: file.name, fileType: file.type || 'image/jpeg', fileBase64: b64,
+          });
+          addToast('warning', 'Connection lost. The document is saved on this kiosk and will upload automatically.');
+          setStep('review');
+        } catch {
+          addToast('error', 'The document could not be saved locally. Please try again when connected.');
+        }
+      } else {
+        addToast('error', e instanceof ApiError ? e.message : 'The document could not be read. Try a clearer photo or press Skip.');
+      }
     } finally {
       setOcrProcessing(false);
     }
   };
 
   const handleSkipDocuments = () => {
-    addToast('info', 'Proceeding without document scan.');
+    addToast('info', 'Continuing without a document scan.');
     setStep('review');
   };
 
-  // ── Step 6: Complete Session ──────────────────────────────────────────────────
   const handleCompleteSession = async () => {
-    try {
-      await ApiService.getSummary(sessionId || 'session-demo');
-    } catch { /* summary will be generated on doctor view */ }
+    if (sessionId) {
+      try {
+        await ApiService.getSummary(sessionId);
+      } catch (e) {
+        // The doctor view generates the summary on demand; a failure here
+        // must not block the patient. Queue nothing — responses are stored.
+        addToast('warning', 'Summary will be prepared for the doctor shortly. You are done — please wait to be called.');
+        setStep('complete');
+        return;
+      }
+    }
     setStep('complete');
-    addToast('success', 'Your intake is complete! Please wait to be called.');
+    addToast('success', 'Your intake is complete. Please wait to be called.');
   };
 
-  // ── Need Help ────────────────────────────────────────────────────────────────
   const handleNeedHelp = async () => {
+    if (!sessionId) {
+      addToast('warning', 'Please wait for the session to start, then press Need help again.');
+      return;
+    }
     try {
-      await ApiService.processDocument(sessionId || 'session-demo', 'HELP_REQUEST', 'patient_requested_help.jpg');
-    } catch { /* ignore */ }
+      await ApiService.requestHelp(sessionId);
+    } catch (e) {
+      if (e instanceof ApiError && e.offline) {
+        enqueueOp({ kind: 'help', key: newIdempotencyKey(), sessionId });
+      } else {
+        addToast('error', e instanceof ApiError ? e.message : 'Could not reach staff dispatch. Please alert someone nearby.');
+        return;
+      }
+    }
     setAssistanceScore(0.0);
-    addToast('warning', 'Staff assistance requested — a navigator will assist you shortly at this kiosk.');
+    addToast('warning', 'Help requested. A staff member will come to this kiosk shortly. Please stay where you are.');
   };
 
-  // ── Reset Countdown ──────────────────────────────────────────────────────────
+  // ── Connectivity: banner state + resync after reconnect ──────────────────
+  const { online, pending, syncing } = useOnlineStatus();
+  const [continuedOffline, setContinuedOffline] = useState(false);
+
+  useEffect(() => {
+    if (online && continuedOffline && pending === 0 && sessionId && step === 'interview') {
+      setContinuedOffline(false);
+      ApiService.nextQuestion(sessionId)
+        .then(res => {
+          if (res.question) {
+            setCurrentQuestion(res.question);
+            setSpeechState('ASKING');
+            addToast('success', 'Connection restored. Continuing with the next question.');
+          } else if (res.is_interview_complete) {
+            setStep('documents');
+            addToast('success', 'Connection restored. Your answers synced — please continue with documents.');
+          }
+        })
+        .catch(() => { /* stay on the local question; outbox keeps retrying */ });
+    }
+    if (!online && step === 'interview') setContinuedOffline(true);
+  }, [online, pending, continuedOffline, sessionId, step, addToast]);
+
+  // ── Snapshot: reload-safe kiosk progress ──────────────────────────────────
+  useEffect(() => {
+    saveSnapshot({ step, lang, sessionId, patient, interviewHistory, currentQuestion, assistanceScore });
+  }, [step, lang, sessionId, patient, interviewHistory, currentQuestion, assistanceScore]);
+
+  useEffect(() => {
+    const snap = loadSnapshot<{
+      step: typeof step; lang: LanguageCode; sessionId: string;
+      patient: Patient | null; interviewHistory: typeof interviewHistory;
+      currentQuestion: Question | null; assistanceScore: number;
+    }>();
+    if (snap?.sessionId && step === 'language') {
+      setLang(snap.lang);
+      setSessionId(snap.sessionId);
+      setPatient(snap.patient);
+      setInterviewHistory(snap.interviewHistory || []);
+      if (snap.currentQuestion) setCurrentQuestion(snap.currentQuestion);
+      setAssistanceScore(snap.assistanceScore ?? 1.0);
+      if (snap.step && snap.step !== 'language' && snap.step !== 'complete') {
+        setStep(snap.step);
+        addToast('info', 'Previous session restored. You can continue where you left off.');
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     let timer: any;
     if (step === 'complete') {
@@ -366,7 +557,8 @@ export const KioskContainer: React.FC = () => {
         setResetCountdown(prev => {
           if (prev <= 1) {
             clearInterval(timer);
-            // Reset all state
+            clearSnapshot();
+            answeredIdsRef.current = [];
             setStep('language');
             setInterviewHistory([]);
             setExtractedEntities([]);
@@ -389,7 +581,6 @@ export const KioskContainer: React.FC = () => {
     return () => clearInterval(timer);
   }, [step]);
 
-  // ── Cleanup on unmount ──────────────────────────────────────────────────────
   useEffect(() => {
     return () => {
       clearInterval(micTimerRef.current);
@@ -398,235 +589,192 @@ export const KioskContainer: React.FC = () => {
     };
   }, []);
 
-  // ─── Score color ─────────────────────────────────────────────────────────────
-  const scoreColor = assistanceScore >= 0.85 ? 'text-emerald-400' : assistanceScore >= 0.65 ? 'text-amber-400' : 'text-red-400';
+  const scoreLabel = assistanceScore >= 0.85 ? 'On track' : assistanceScore >= 0.65 ? 'Needs confirmation' : 'Staff review';
+  const scoreClasses = assistanceScore >= 0.85 ? 'text-emerald-700 bg-emerald-50 border-emerald-200' : assistanceScore >= 0.65 ? 'text-amber-700 bg-amber-50 border-amber-200' : 'text-red-700 bg-red-50 border-red-200';
 
   return (
-    <div className="fixed inset-0 bg-[#0f1117] text-white flex flex-col font-sans select-none overflow-hidden">
+    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col">
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
 
-      {/* ── Header ──────────────────────────────────────────────────────────── */}
-      <header className="bg-[#151820] border-b border-white/5 px-6 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-teal-500 flex items-center justify-center">
-            <Activity className="w-4 h-4 text-white" />
+      {/* Header */}
+      <header className="bg-white border-b border-slate-200 px-4 sm:px-6 py-3">
+        <div className="max-w-3xl mx-auto flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-lg bg-teal-700 flex items-center justify-center shrink-0">
+              <Activity className="w-4.5 h-4.5 w-5 h-5 text-white" />
+            </div>
+            <div>
+              <div className="text-[15px] font-semibold text-slate-900 leading-tight">MediKiosk</div>
+              <div className="text-xs text-slate-500">OPD intake · {lang.toUpperCase()}</div>
+            </div>
           </div>
-          <div>
-            <div className="text-sm font-bold text-white">MediKiosk</div>
-            <div className="text-[10px] text-slate-500">OPD Terminal · {lang.toUpperCase()}</div>
+
+          <div className="flex items-center gap-2">
+            {step !== 'language' && (
+              <span className={`hidden sm:inline-flex items-center text-xs font-medium px-2.5 py-1 rounded border ${scoreClasses}`}>
+                {scoreLabel} · {Math.round(assistanceScore * 100)}%
+              </span>
+            )}
+            {ttsActive && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border border-teal-200 bg-teal-50 text-xs text-teal-800" role="status">
+                <Volume2 className="w-3.5 h-3.5" />
+                Speaking…
+              </span>
+            )}
+            <button
+              onClick={handleNeedHelp}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 min-h-[44px] rounded-lg border border-amber-300 bg-amber-50 text-amber-800 text-sm font-semibold hover:bg-amber-100"
+            >
+              <HelpCircle className="w-4 h-4" />
+              Need help
+            </button>
           </div>
         </div>
-
-        <div className="flex items-center gap-2">
-          {/* Assistance score */}
-          {step !== 'language' && (
-            <div className="hidden sm:flex items-center gap-2 text-xs">
-              <span className="text-slate-500">Confidence</span>
-              <span className={`font-bold ${scoreColor}`}>{Math.round(assistanceScore * 100)}%</span>
-            </div>
-          )}
-
-          {/* TTS indicator */}
-          {ttsActive && (
-            <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-teal-500/10 border border-teal-500/20">
-              <Volume2 className="w-3.5 h-3.5 text-teal-400 animate-pulse" />
-              <span className="text-[10px] text-teal-400 font-medium">Speaking</span>
-            </div>
-          )}
-
-          <button
-            onClick={handleNeedHelp}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-semibold hover:bg-amber-500/20 transition-colors"
-          >
-            <HelpCircle className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Need Help</span>
-          </button>
-
-          <button
-            onClick={() => setStep('language')}
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 text-xs font-medium transition-colors"
-          >
-            <Globe2 className="w-3.5 h-3.5" />
-            <span className="uppercase">{lang}</span>
-          </button>
+        <div className="max-w-3xl mx-auto mt-3">
+          <KioskProgress step={step} />
         </div>
+        {!online && (
+          <div className="max-w-3xl mx-auto mt-2.5" role="alert">
+            <p className="text-[13px] font-medium px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800">
+              Offline — answers and documents are saved on this kiosk{pending > 0 && ` (${pending} waiting to sync)`}. Please continue; everything sends automatically.
+            </p>
+          </div>
+        )}
+        {online && (syncing || pending > 0) && (
+          <div className="max-w-3xl mx-auto mt-2.5" role="status">
+            <p className="text-[13px] font-medium px-3 py-2 rounded-lg bg-teal-50 border border-teal-200 text-teal-800">
+              Syncing saved items… ({pending} left)
+            </p>
+          </div>
+        )}
       </header>
 
-      {/* ── Main Content ────────────────────────────────────────────────────── */}
-      <main className="flex-1 flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
-        <div className="w-full max-w-2xl">
+      {/* Main */}
+      <main className="flex-1 w-full">
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
 
-          {/* ══ STEP 1: LANGUAGE ══════════════════════════════════════════════ */}
+          {/* STEP 1: LANGUAGE */}
           {step === 'language' && (
             <div className="space-y-6 animate-fadeIn">
-              <div className="text-center space-y-1">
-                <div className="w-12 h-12 rounded-2xl bg-teal-500 flex items-center justify-center mx-auto mb-3">
-                  <Globe2 className="w-6 h-6 text-white" />
-                </div>
-                <h1 className="text-2xl font-bold text-white">Select Language</h1>
-                <p className="text-sm text-slate-400">अपनी भाषा चुनें / Choose your preferred language</p>
+              <div className="text-center">
+                <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">Which language should we use?</h1>
+                <p className="text-base text-slate-600 mt-2">अपनी भाषा चुनें · Choose one option below</p>
               </div>
-
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3" role="group" aria-label="Language choices">
                 {LANGUAGES.map(l => (
                   <button
                     key={l.code}
                     onClick={() => handleSelectLanguage(l.code)}
-                    className="group p-4 rounded-2xl bg-[#1a1f2a] border border-white/5 hover:border-teal-500/50 hover:bg-[#1e2435] transition-all flex flex-col items-center gap-2 active:scale-95"
+                    className="min-h-[76px] p-4 rounded-lg bg-white border border-slate-300 hover:border-teal-700 hover:bg-teal-50/40 flex flex-col items-center justify-center gap-1"
                   >
-                    <span className="text-2xl">{l.flag}</span>
-                    <span className="text-sm font-bold text-white group-hover:text-teal-400 transition-colors">{l.nativeName}</span>
-                    <span className="text-[10px] text-slate-500">{l.name}</span>
+                    <span className="text-2xl" aria-hidden>{l.flag}</span>
+                    <span className="text-base font-semibold text-slate-900">{l.nativeName}</span>
+                    <span className="text-xs text-slate-500">{l.name}</span>
                   </button>
                 ))}
               </div>
+              <p className="text-center text-sm text-slate-500">You can listen to every question aloud. A staff member can help at any time.</p>
             </div>
           )}
 
-          {/* ══ STEP 2: ABHA IDENTIFICATION ══════════════════════════════════ */}
+          {/* STEP 2: ABHA */}
           {step === 'abha' && (
             <div className="space-y-5 animate-fadeIn">
-              <div className="text-center space-y-1">
-                <div className="w-12 h-12 rounded-2xl bg-blue-500/20 border border-blue-500/30 flex items-center justify-center mx-auto mb-3">
-                  <ShieldCheck className="w-6 h-6 text-blue-400" />
-                </div>
-                <h2 className="text-xl font-bold text-white">{strings.abhaTitle}</h2>
-                <p className="text-sm text-slate-400">{strings.abhaSubtitle}</p>
+              <div className="text-center">
+                <h2 className="text-2xl font-semibold tracking-tight">{strings.abhaTitle}</h2>
+                <p className="text-base text-slate-600 mt-1">{strings.abhaSubtitle}</p>
               </div>
 
               {abhaMode === 'unknown' && (
                 <div className="space-y-3">
-                  <p className="text-center text-sm text-slate-400">Do you have an ABHA (Ayushman Bharat Health Account) ID?</p>
-                  <div className="grid grid-cols-2 gap-3">
+                  <p className="text-center text-base text-slate-700 font-medium">Do you have an ABHA health ID?</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <button
                       onClick={() => setAbhaMode('have')}
-                      className="p-5 rounded-2xl bg-[#1a1f2a] border border-white/5 hover:border-teal-500/40 hover:bg-[#1e2435] transition-all text-center space-y-2 active:scale-95"
+                      className="min-h-[96px] p-5 rounded-lg bg-white border border-slate-300 hover:border-teal-700 flex flex-col items-center gap-1.5"
                     >
-                      <ShieldCheck className="w-8 h-8 text-teal-400 mx-auto" />
-                      <div className="font-bold text-white text-sm">Yes, I have ABHA ID</div>
-                      <div className="text-[11px] text-slate-500">हाँ, मेरे पास आभा आईडी है</div>
+                      <ShieldCheck className="w-7 h-7 text-teal-700" />
+                      <span className="font-semibold text-slate-900">Yes, I have an ABHA ID</span>
+                      <span className="text-sm text-slate-500">हाँ, मेरे पास आभा आईडी है</span>
                     </button>
                     <button
                       onClick={() => setAbhaMode('create')}
-                      className="p-5 rounded-2xl bg-[#1a1f2a] border border-white/5 hover:border-blue-500/40 hover:bg-[#1e2435] transition-all text-center space-y-2 active:scale-95"
+                      className="min-h-[96px] p-5 rounded-lg bg-white border border-slate-300 hover:border-teal-700 flex flex-col items-center gap-1.5"
                     >
-                      <UserPlus className="w-8 h-8 text-blue-400 mx-auto" />
-                      <div className="font-bold text-white text-sm">No, register new</div>
-                      <div className="text-[11px] text-slate-500">नया पंजीकरण करें</div>
+                      <UserPlus className="w-7 h-7 text-teal-700" />
+                      <span className="font-semibold text-slate-900">No, register me</span>
+                      <span className="text-sm text-slate-500">नया पंजीकरण करें</span>
                     </button>
                   </div>
-                  <button
-                    onClick={handleSkipAbha}
-                    className="w-full py-3 rounded-xl text-slate-500 hover:text-slate-300 text-sm transition-colors"
-                  >
-                    Skip — Proceed as Walk-in Patient →
+                  <button onClick={handleSkipAbha} className="w-full min-h-[52px] py-3 rounded-lg text-slate-600 hover:text-slate-900 text-[15px] font-medium border border-transparent hover:border-slate-200">
+                    Skip — continue as walk-in patient →
                   </button>
                 </div>
               )}
 
               {abhaMode === 'have' && (
-                <div className="space-y-4">
+                <div className="clinical-card p-5 space-y-4">
                   <div className="space-y-2">
-                    <label className="block text-xs font-medium text-slate-400">ABHA ID</label>
-                    <div className="flex gap-2">
+                    <label htmlFor="abha-id" className="label-micro">ABHA ID</label>
+                    <div className="flex flex-col sm:flex-row gap-2">
                       <input
+                        id="abha-id"
                         type="text"
                         value={abhaInput}
                         onChange={e => setAbhaInput(e.target.value)}
                         onKeyDown={e => e.key === 'Enter' && handleAbhaLookup()}
                         placeholder="91-XXXX-XXXX-XXXX"
-                        className="flex-1 px-4 py-3 rounded-xl bg-[#1a1f2a] border border-white/10 text-teal-400 font-mono text-lg font-bold placeholder:text-slate-600 focus:border-teal-500 focus:outline-none"
+                        className="clinical-input flex-1 px-4 py-3.5 min-h-[56px] font-mono text-lg"
                       />
                       <button
                         onClick={handleAbhaLookup}
                         disabled={abhaLookupLoading}
-                        className="px-4 py-3 rounded-xl bg-teal-500 hover:bg-teal-400 text-white font-bold disabled:opacity-50 transition-colors flex items-center gap-2"
+                        className="btn-primary px-6 min-h-[56px] inline-flex items-center justify-center gap-2"
                       >
                         {abhaLookupLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-                        <span className="hidden sm:inline">{abhaLookupLoading ? 'Looking up...' : 'Find'}</span>
+                        {abhaLookupLoading ? 'Checking…' : 'Find'}
                       </button>
                     </div>
-                    <p className="text-[11px] text-slate-500">Try: 91-8823-9912-4012 or 91-1122-3344-5566</p>
+                    <p className="text-[13px] text-slate-500">Demo IDs: 91-8823-9912-4012 or 91-1122-3344-5566</p>
                   </div>
-
                   <div className="flex gap-2">
-                    <button onClick={() => setAbhaMode('unknown')} className="px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 text-sm transition-colors">
-                      ← Back
-                    </button>
-                    <button onClick={handleSkipAbha} className="flex-1 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 text-sm transition-colors">
-                      Skip → Walk-in
-                    </button>
+                    <button onClick={() => setAbhaMode('unknown')} className="btn-secondary px-4 py-2.5 min-h-[48px] text-sm">← Back</button>
+                    <button onClick={handleSkipAbha} className="btn-secondary flex-1 py-2.5 min-h-[48px] text-sm">Skip → walk-in</button>
                   </div>
                 </div>
               )}
 
               {abhaMode === 'create' && (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="col-span-2 space-y-1.5">
-                      <label className="text-xs font-medium text-slate-400">Full Name *</label>
-                      <input
-                        type="text"
-                        value={newName}
-                        onChange={e => setNewName(e.target.value)}
-                        placeholder="Rajesh Kumar"
-                        className="w-full px-3 py-2.5 rounded-xl bg-[#1a1f2a] border border-white/10 text-white text-sm focus:border-teal-500 focus:outline-none"
-                      />
+                <div className="clinical-card p-5 space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="sm:col-span-2 space-y-1.5">
+                      <label htmlFor="nb-name" className="label-micro">Full name *</label>
+                      <input id="nb-name" type="text" value={newName} onChange={e => setNewName(e.target.value)} placeholder="Rajesh Kumar" className="clinical-input px-3.5 py-3 min-h-[52px]" />
                     </div>
                     <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-slate-400">Age *</label>
-                      <input
-                        type="number"
-                        value={newAge}
-                        onChange={e => setNewAge(e.target.value)}
-                        placeholder="45"
-                        className="w-full px-3 py-2.5 rounded-xl bg-[#1a1f2a] border border-white/10 text-white text-sm focus:border-teal-500 focus:outline-none"
-                      />
+                      <label htmlFor="nb-age" className="label-micro">Age *</label>
+                      <input id="nb-age" type="number" value={newAge} onChange={e => setNewAge(e.target.value)} placeholder="45" className="clinical-input px-3.5 py-3 min-h-[52px]" />
                     </div>
                     <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-slate-400">Gender *</label>
-                      <select
-                        value={newGender}
-                        onChange={e => setNewGender(e.target.value)}
-                        className="w-full px-3 py-2.5 rounded-xl bg-[#1a1f2a] border border-white/10 text-white text-sm focus:border-teal-500 focus:outline-none"
-                      >
-                        <option>Male</option>
-                        <option>Female</option>
-                        <option>Other</option>
+                      <label htmlFor="nb-gender" className="label-micro">Gender *</label>
+                      <select id="nb-gender" value={newGender} onChange={e => setNewGender(e.target.value)} className="clinical-input px-3.5 py-3 min-h-[52px]">
+                        <option>Male</option><option>Female</option><option>Other</option>
                       </select>
                     </div>
                     <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-slate-400">Phone *</label>
-                      <input
-                        type="tel"
-                        value={newPhone}
-                        onChange={e => setNewPhone(e.target.value)}
-                        placeholder="+91 98765 43210"
-                        className="w-full px-3 py-2.5 rounded-xl bg-[#1a1f2a] border border-white/10 text-white text-sm focus:border-teal-500 focus:outline-none"
-                      />
+                      <label htmlFor="nb-phone" className="label-micro">Phone *</label>
+                      <input id="nb-phone" type="tel" value={newPhone} onChange={e => setNewPhone(e.target.value)} placeholder="+91 98765 43210" className="clinical-input px-3.5 py-3 min-h-[52px]" />
                     </div>
                     <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-slate-400">Date of Birth</label>
-                      <input
-                        type="date"
-                        value={newDob}
-                        onChange={e => setNewDob(e.target.value)}
-                        className="w-full px-3 py-2.5 rounded-xl bg-[#1a1f2a] border border-white/10 text-white text-sm focus:border-teal-500 focus:outline-none"
-                      />
+                      <label htmlFor="nb-dob" className="label-micro">Date of birth</label>
+                      <input id="nb-dob" type="date" value={newDob} onChange={e => setNewDob(e.target.value)} className="clinical-input px-3.5 py-3 min-h-[52px]" />
                     </div>
                   </div>
-
                   <div className="flex gap-2">
-                    <button onClick={() => setAbhaMode('unknown')} className="px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 text-sm">
-                      ← Back
-                    </button>
-                    <button
-                      onClick={handleCreateAbha}
-                      disabled={abhaLookupLoading}
-                      className="flex-1 py-2.5 rounded-xl bg-blue-500 hover:bg-blue-400 text-white font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-50 transition-colors"
-                    >
+                    <button onClick={() => setAbhaMode('unknown')} className="btn-secondary px-4 py-3 min-h-[52px] text-sm">← Back</button>
+                    <button onClick={handleCreateAbha} disabled={abhaLookupLoading} className="btn-primary flex-1 py-3 min-h-[52px] inline-flex items-center justify-center gap-2">
                       {abhaLookupLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
-                      {abhaLookupLoading ? 'Creating...' : 'Create ABHA ID & Continue'}
+                      {abhaLookupLoading ? 'Creating…' : 'Create ABHA ID and continue'}
                     </button>
                   </div>
                 </div>
@@ -634,438 +782,376 @@ export const KioskContainer: React.FC = () => {
             </div>
           )}
 
-          {/* ══ STEP 2c: ABHA HEALTH RECORDS ═════════════════════════════════ */}
+          {/* ABHA RECORDS */}
           {step === 'abha_records' && patient && (
             <div className="space-y-5 animate-fadeIn">
-              <div className="flex items-center gap-3 p-4 rounded-2xl bg-teal-500/10 border border-teal-500/20">
-                <div className="w-10 h-10 rounded-xl bg-teal-500 flex items-center justify-center shrink-0">
-                  <CheckCircle2 className="w-5 h-5 text-white" />
+              <div className="clinical-card p-4 flex items-center gap-3 border-l-4 border-l-emerald-600">
+                <div className="w-11 h-11 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-lg font-semibold shrink-0" aria-hidden>
+                  {patient.name.charAt(0)}
                 </div>
                 <div>
-                  <div className="font-bold text-white">{patient.name}</div>
-                  <div className="text-xs text-slate-400">{patient.age} yrs · {patient.gender} · ABHA: {patient.abha_id}</div>
+                  <div className="font-semibold text-slate-900">{patient.name}</div>
+                  <div className="text-sm text-slate-500">{patient.age} yrs · {patient.gender} · ABHA {patient.abha_id}</div>
                 </div>
+                <span className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-emerald-700"><CheckCircle2 className="w-4 h-4" /> Verified</span>
               </div>
 
               <div>
                 <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-sm font-bold text-white">Health Records from ABHA Portal</h3>
-                  <span className="text-[10px] text-teal-400 font-medium">{abhaRecords.length} records found</span>
+                  <h3 className="font-semibold text-slate-900">Records found ({abhaRecords.length})</h3>
+                  <span className="text-xs text-slate-500">From ABHA portal</span>
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-2.5">
                   {abhaRecords.map((rec, idx) => (
-                    <div key={idx} className="p-3.5 rounded-xl bg-[#1a1f2a] border border-white/5">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase
-                              ${rec.type === 'PRESCRIPTION' ? 'bg-blue-500/20 text-blue-400' :
-                                rec.type === 'LAB_REPORT' ? 'bg-purple-500/20 text-purple-400' :
-                                'bg-amber-500/20 text-amber-400'}`}>
-                              {rec.type.replace('_', ' ')}
-                            </span>
-                            <span className="text-[10px] text-slate-500">{rec.date}</span>
-                          </div>
-                          <p className="text-xs text-slate-300 font-medium">{rec.summary}</p>
-                          <p className="text-[10px] text-slate-500 mt-0.5">{rec.doctor} · {rec.facility}</p>
-                          {rec.medications && (
-                            <div className="flex flex-wrap gap-1 mt-1.5">
-                              {rec.medications.map((m, i) => (
-                                <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">{m}</span>
-                              ))}
-                            </div>
-                          )}
-                        </div>
+                    <div key={idx} className="clinical-card p-4">
+                      <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                        <span className="text-[11px] px-2 py-0.5 rounded border font-semibold uppercase tracking-wide bg-slate-50 text-slate-600 border-slate-200">
+                          {rec.type.replace('_', ' ')}
+                        </span>
+                        <span className="text-xs text-slate-500">{rec.date}</span>
                       </div>
+                      <p className="text-[15px] text-slate-800 font-medium">{rec.summary}</p>
+                      <p className="text-[13px] text-slate-500 mt-0.5">{rec.doctor} · {rec.facility}</p>
+                      {rec.medications && (
+                        <div className="flex flex-wrap gap-1.5 mt-2">
+                          {rec.medications.map((m, i) => (
+                            <span key={i} className="text-xs px-2 py-0.5 rounded border bg-emerald-50 text-emerald-800 border-emerald-200">{m}</span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
               </div>
 
-              <button
-                onClick={() => setStep('consent')}
-                className="w-full py-3.5 rounded-xl bg-teal-500 hover:bg-teal-400 text-white font-bold flex items-center justify-center gap-2 transition-colors"
-              >
-                <span>Continue to Intake</span>
-                <ArrowRight className="w-4 h-4" />
+              <button onClick={() => setStep('consent')} className="btn-primary w-full py-4 min-h-[60px] inline-flex items-center justify-center gap-2 text-base">
+                Continue to consent <ArrowRight className="w-4 h-4" />
               </button>
             </div>
           )}
 
-          {/* ══ STEP 3: CONSENT ══════════════════════════════════════════════ */}
+          {/* CONSENT */}
           {step === 'consent' && (
             <div className="space-y-5 animate-fadeIn">
               {patient && (
-                <div className="flex items-center gap-3 p-4 rounded-xl bg-[#1a1f2a] border border-white/5">
-                  <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-lg font-bold text-white shrink-0">
+                <div className="clinical-card p-4 flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-lg font-semibold shrink-0" aria-hidden>
                     {patient.name.charAt(0)}
                   </div>
                   <div>
-                    <div className="font-bold text-white text-sm">{patient.name}</div>
-                    <div className="text-[11px] text-slate-500">ABHA: {patient.abha_id} · {patient.age} yrs</div>
+                    <div className="font-semibold text-slate-900">{patient.name}</div>
+                    <div className="text-[13px] text-slate-500">ABHA: {patient.abha_id} · {patient.age} yrs</div>
                   </div>
                 </div>
               )}
 
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <ShieldCheck className="w-5 h-5 text-teal-400" />
-                  <h2 className="font-bold text-white">{strings.consentTitle}</h2>
+              <div className="clinical-card p-5 sm:p-6">
+                <div className="flex items-center gap-2 mb-3">
+                  <ShieldCheck className="w-5 h-5 text-teal-700" />
+                  <h2 className="text-lg font-semibold">{strings.consentTitle}</h2>
                 </div>
-                <div className="p-4 rounded-xl bg-[#1a1f2a] border border-white/5 text-sm text-slate-300 leading-relaxed">
-                  {strings.consentText}
-                </div>
+                <p className="text-[15px] text-slate-700 leading-relaxed">{strings.consentText}</p>
+                <p className="text-[13px] text-slate-500 mt-3">Nothing here is a diagnosis or prescription. A doctor reviews everything before treatment.</p>
               </div>
 
-              <div className="flex gap-3">
-                <button
-                  onClick={handleReadConsent}
-                  className="flex items-center gap-2 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 text-sm font-medium transition-colors"
-                >
-                  {ttsActive ? <VolumeX className="w-4 h-4" onClick={() => { tts.cancel(); setTtsActive(false); }} /> : <Volume2 className="w-4 h-4" />}
-                  <span>{strings.readAloud}</span>
+              <div className="flex flex-col sm:flex-row gap-2.5">
+                <button onClick={handleReadConsent} className="btn-secondary flex items-center justify-center gap-2 px-4 py-3.5 min-h-[56px]">
+                  <Volume2 className="w-4 h-4" />
+                  {strings.readAloud}
                 </button>
-                <button
-                  onClick={handleConsent}
-                  className="flex-1 py-3 rounded-xl bg-teal-500 hover:bg-teal-400 text-white font-bold flex items-center justify-center gap-2 transition-colors"
-                >
-                  <Check className="w-4 h-4" />
-                  <span>{strings.agree}</span>
+                <button onClick={handleConsent} className="btn-primary flex-1 py-3.5 min-h-[56px] inline-flex items-center justify-center gap-2 text-base">
+                  <Check className="w-5 h-5" />
+                  {strings.agree}
                 </button>
               </div>
             </div>
           )}
 
-          {/* ══ STEP 4: AI VOICE INTERVIEW ════════════════════════════════════ */}
+          {/* INTERVIEW */}
           {step === 'interview' && currentQuestion && (
-            <div className="space-y-5 animate-fadeIn">
-              {/* Progress & Category Banner */}
-              <div className="flex items-center justify-between text-xs">
-                <div className="flex items-center gap-2">
-                  <span className="px-2 py-0.5 rounded-full bg-teal-500/10 border border-teal-500/20 text-[10px] font-bold text-teal-400 uppercase tracking-wider">
-                    {currentQuestion.category.startsWith('HPI_')
-                      ? `HPI · SOCRATES ${currentQuestion.category.replace('HPI_', '')}`
-                      : currentQuestion.category.replace(/_/g, ' ')}
-                  </span>
-                </div>
-                <span className="text-slate-500 text-[11px] font-medium">Inquiry Turn {interviewHistory.length + 1}</span>
-              </div>
-              <div className="h-1 bg-white/5 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-teal-500 rounded-full transition-all duration-500"
-                  style={{ width: `${Math.min(100, Math.max(8, ((interviewHistory.length + 1) / 14) * 100))}%` }}
-                />
+            <div className="space-y-5 animate-fadeIn" aria-live="polite">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs font-semibold px-2.5 py-1 rounded border bg-slate-100 border-slate-200 text-slate-600 uppercase tracking-wide">
+                  {currentQuestion.category.replace(/_/g, ' ')}
+                </span>
+                <span className="text-[13px] text-slate-500">Question {interviewHistory.length + 1}</span>
               </div>
 
-              {/* Question */}
-              <div className="text-center space-y-2">
-                <h2 className="text-xl sm:text-2xl font-bold text-white leading-snug">
+              <div className="text-center pt-1">
+                <h2 className="text-xl sm:text-2xl font-semibold leading-snug max-w-xl mx-auto">
                   {currentQuestion.text[lang] || currentQuestion.text['en']}
                 </h2>
-                <button
-                  onClick={() => readQuestionAloud(currentQuestion)}
-                  className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-teal-400 transition-colors"
-                >
-                  <Volume2 className="w-3.5 h-3.5" />
-                  <span>Listen</span>
+                <button onClick={() => readQuestionAloud(currentQuestion)} className="mt-2 inline-flex items-center gap-1.5 text-sm text-teal-700 hover:text-teal-800 font-medium min-h-[44px] px-3">
+                  <Volume2 className="w-4 h-4" />
+                  Listen again
                 </button>
               </div>
 
-              {/* Mic Button */}
-              <div className="flex flex-col items-center gap-3">
+              {/* Mic + explicit states */}
+              <div className="flex flex-col items-center gap-3 py-1">
                 {speechState === 'THINKING' ? (
-                  <div className="w-20 h-20 rounded-full bg-[#1a1f2a] border-2 border-white/10 flex items-center justify-center">
-                    <Loader2 className="w-8 h-8 text-teal-400 animate-spin" />
+                  <div className="text-center" role="status">
+                    <div className="w-20 h-20 rounded-full bg-white border border-slate-300 flex items-center justify-center mx-auto">
+                      <Loader2 className="w-8 h-8 text-teal-700 animate-spin" />
+                    </div>
+                    <p className="text-sm font-medium text-slate-700 mt-3">Saving your answer…</p>
+                    <p className="text-[13px] text-slate-500">Please wait a moment.</p>
                   </div>
                 ) : (
                   <button
                     onClick={speechState === 'LISTENING' ? () => handleStopListening() : handleStartListening}
-                    className={`w-20 h-20 rounded-full flex items-center justify-center transition-all active:scale-95 shadow-lg
+                    aria-pressed={speechState === 'LISTENING'}
+                    aria-label={speechState === 'LISTENING' ? 'Stop recording' : 'Start recording your answer'}
+                    className={`w-20 h-20 rounded-full flex items-center justify-center border-2 min-h-[80px] min-w-[80px]
                       ${speechState === 'LISTENING'
-                        ? 'bg-red-500 shadow-red-500/30 ring-4 ring-red-500/20 animate-pulse'
-                        : 'bg-teal-500 shadow-teal-500/20 hover:bg-teal-400'}`}
+                        ? 'bg-red-600 border-red-700 text-white'
+                        : 'bg-teal-700 border-teal-800 text-white hover:bg-teal-800'}`}
                   >
-                    {speechState === 'LISTENING' ? (
-                      <MicOff className="w-8 h-8 text-white" />
-                    ) : (
-                      <Mic className="w-8 h-8 text-white" />
-                    )}
+                    {speechState === 'LISTENING' ? <MicOff className="w-8 h-8" /> : <Mic className="w-8 h-8" />}
                   </button>
                 )}
 
                 {speechState === 'LISTENING' && (
-                  <div className="text-center space-y-1">
-                    <div className="flex items-center gap-2 justify-center text-red-400">
-                      <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                      <span className="text-sm font-medium">Recording... {micSeconds}s</span>
-                      <span className="text-xs text-slate-500">(max 15s)</span>
-                    </div>
-                    {liveTranscript && (
-                      <p className="text-sm text-teal-300 italic">"{liveTranscript}"</p>
-                    )}
+                  <div className="text-center" role="status">
+                    <p className="inline-flex items-center gap-2 text-sm font-semibold text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-1.5">
+                      <span className="w-2 h-2 rounded-full bg-red-600" aria-hidden /> Recording… {micSeconds}s of 15s
+                    </p>
+                    {liveTranscript
+                      ? <p className="text-[15px] text-slate-700 italic mt-2 max-w-md">“{liveTranscript}”</p>
+                      : <p className="text-sm text-slate-500 mt-2">Speak clearly. Tap the microphone again to finish.</p>}
                   </div>
                 )}
-
                 {speechState === 'ASKING' && (
-                  <p className="text-sm text-slate-500">{strings.speakNow}</p>
+                  <p className="text-[15px] text-slate-600">Tap the microphone and speak — <span className="font-medium">or</span> tap an option below.</p>
                 )}
               </div>
 
-              {/* Touch Options */}
               {currentQuestion.options && speechState !== 'THINKING' && (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-[10px] text-slate-600 uppercase tracking-widest">
-                    <div className="flex-1 h-px bg-white/5" />
-                    <span>{strings.orTouch}</span>
-                    <div className="flex-1 h-px bg-white/5" />
+                <div className="space-y-2.5">
+                  <div className="flex items-center gap-3 text-xs text-slate-400 uppercase tracking-wide">
+                    <div className="flex-1 h-px bg-slate-200" />
+                    <span>Touch options</span>
+                    <div className="flex-1 h-px bg-slate-200" />
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 gap-2.5">
                     {currentQuestion.options.map((opt, idx) => (
                       <button
                         key={idx}
                         onClick={() => handleAnswerSubmit(opt)}
-                        className="p-3.5 rounded-xl bg-[#1a1f2a] hover:bg-[#1e2435] border border-white/5 hover:border-teal-500/30 text-left text-sm font-medium text-slate-200 hover:text-white transition-all"
+                        className="min-h-[56px] p-4 rounded-lg bg-white border border-slate-300 hover:border-teal-700 hover:bg-teal-50/50 text-left text-[15px] font-medium text-slate-800"
                       >
                         {opt}
                       </button>
                     ))}
                     <button
                       onClick={() => handleAnswerSubmit("I don't remember / याद नहीं")}
-                      className="p-3.5 rounded-xl bg-[#1a1f2a] hover:bg-[#1e2435] border border-white/5 hover:border-amber-500/30 text-left text-sm font-medium text-amber-500 transition-all sm:col-span-2"
+                      className="min-h-[56px] p-4 rounded-lg bg-white border border-dashed border-slate-300 text-left text-[15px] font-medium text-slate-600 hover:border-amber-400"
                     >
-                      I don't remember / याद नहीं
+                      I don&apos;t remember / याद नहीं
                     </button>
                   </div>
                 </div>
               )}
 
-              {/* Interview history */}
               {interviewHistory.length > 0 && (
-                <div className="space-y-1.5 pt-2 border-t border-white/5">
-                  <p className="text-[10px] text-slate-600 uppercase tracking-wider">Captured so far</p>
-                  {interviewHistory.map((h, i) => (
-                    <div key={i} className="flex items-center justify-between gap-3 p-2.5 rounded-lg bg-[#1a1f2a]">
-                      <div className="min-w-0">
-                        <p className="text-[10px] text-slate-500 truncate">{h.q}</p>
-                        <p className="text-xs text-teal-400 font-medium truncate">{h.a}</p>
+                <details className="clinical-card">
+                  <summary className="px-4 py-3 text-sm font-medium text-slate-600 cursor-pointer min-h-[48px]">Answers recorded so far ({interviewHistory.length})</summary>
+                  <div className="px-4 pb-3 space-y-2 border-t border-slate-100 pt-3">
+                    {interviewHistory.map((h, i) => (
+                      <div key={i} className="flex items-start gap-2.5 text-sm">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
+                        <div className="min-w-0">
+                          <p className="text-xs text-slate-500">{h.q}</p>
+                          <p className="font-medium text-slate-800">{h.a}</p>
+                        </div>
                       </div>
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                </details>
               )}
             </div>
           )}
 
-          {/* ══ STEP 5: DOCUMENT SCANNER ══════════════════════════════════════ */}
+          {/* DOCUMENTS */}
           {step === 'documents' && (
             <div className="space-y-5 animate-fadeIn">
-              <div className="text-center space-y-1">
-                <div className="w-12 h-12 rounded-2xl bg-purple-500/20 border border-purple-500/30 flex items-center justify-center mx-auto mb-3">
-                  <FileText className="w-6 h-6 text-purple-400" />
-                </div>
-                <h2 className="text-xl font-bold text-white">{strings.docScanTitle}</h2>
-                <p className="text-sm text-slate-400">{strings.docScanDesc}</p>
+              <div className="text-center">
+                <h2 className="text-2xl font-semibold tracking-tight">{strings.docScanTitle}</h2>
+                <p className="text-base text-slate-600 mt-1">{strings.docScanDesc}</p>
               </div>
 
               {ocrProcessing ? (
-                <div className="text-center py-12 space-y-3">
-                  <Loader2 className="w-10 h-10 text-teal-400 animate-spin mx-auto" />
-                  <p className="text-sm font-medium text-teal-400">{strings.ocrProcessing}</p>
+                <div className="clinical-card p-10 text-center" role="status">
+                  <Loader2 className="w-10 h-10 text-teal-700 animate-spin mx-auto" />
+                  <p className="font-semibold text-slate-900 mt-4">Reading your document…</p>
+                  <p className="text-sm text-slate-500 mt-1">Extracting medicines and doses. Do not close this screen.</p>
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {/* Upload Zone */}
                   <button
                     onClick={() => fileInputRef.current?.click()}
-                    className="w-full p-8 rounded-2xl bg-[#1a1f2a] border-2 border-dashed border-white/10 hover:border-teal-500/50 hover:bg-[#1e2435] transition-all group text-center space-y-3"
+                    className="w-full min-h-[120px] p-8 rounded-lg bg-white border-2 border-dashed border-slate-300 hover:border-teal-700 text-center"
                   >
-                    <div className="w-12 h-12 rounded-xl bg-teal-500/10 flex items-center justify-center mx-auto group-hover:bg-teal-500/20 transition-colors">
-                      <Upload className="w-6 h-6 text-teal-400" />
-                    </div>
-                    <div>
-                      <p className="font-bold text-white text-sm">Upload Prescription / Report</p>
-                      <p className="text-[11px] text-slate-500 mt-1">Photo, PDF, or image file · Camera available on mobile</p>
-                    </div>
+                    <Upload className="w-7 h-7 text-teal-700 mx-auto mb-2" />
+                    <span className="font-semibold text-slate-900 block">Upload prescription or report</span>
+                    <span className="text-sm text-slate-500 block mt-1">Take a photo or choose a file · JPG, PNG, or PDF</span>
                   </button>
 
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*,application/pdf"
-                    capture="environment"
-                    onChange={e => handleFileUpload(e.target.files)}
-                    className="hidden"
-                  />
+                  <input ref={fileInputRef} type="file" accept="image/*,application/pdf" capture="environment" onChange={e => handleFileUpload(e.target.files)} className="hidden" aria-label="Upload prescription or report" />
 
-                  {/* Uploaded files preview */}
                   {uploadedFiles.length > 0 && (
                     <div className="space-y-2">
                       {uploadedFiles.map((f, i) => (
-                        <div key={i} className="flex items-center gap-3 p-3 rounded-xl bg-[#1a1f2a] border border-white/5">
-                          <FileIcon className="w-4 h-4 text-teal-400 shrink-0" />
-                          <span className="text-sm text-slate-300 truncate flex-1">{f.name}</span>
-                          <span className="text-[10px] text-slate-500">{(f.size / 1024).toFixed(0)} KB</span>
+                        <div key={i} className="clinical-card p-3 flex items-center gap-3">
+                          <FileIcon className="w-4 h-4 text-teal-700 shrink-0" />
+                          <span className="text-sm text-slate-700 truncate flex-1">{f.name}</span>
+                          <span className="text-xs text-slate-500">{(f.size / 1024).toFixed(0)} KB</span>
                         </div>
                       ))}
                     </div>
                   )}
 
-                  <div className="flex items-center gap-3 text-[11px] text-slate-600">
-                    <div className="flex-1 h-px bg-white/5" />
-                    <span>or</span>
-                    <div className="flex-1 h-px bg-white/5" />
+                  <div className="flex items-center gap-3 text-xs text-slate-400">
+                    <div className="flex-1 h-px bg-slate-200" /><span>If you have no papers with you</span><div className="flex-1 h-px bg-slate-200" />
                   </div>
 
-                  <button
-                    onClick={handleSkipDocuments}
-                    className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 text-sm font-medium transition-colors"
-                  >
-                    Skip — No documents to upload
+                  <button onClick={handleSkipDocuments} className="btn-secondary w-full py-3.5 min-h-[56px]">
+                    Skip — I have no documents
                   </button>
                 </div>
               )}
             </div>
           )}
 
-          {/* ══ STEP 6: REVIEW ════════════════════════════════════════════════ */}
+          {/* REVIEW */}
           {step === 'review' && (
             <div className="space-y-4 animate-fadeIn">
-              <div className="flex items-center justify-between">
-                <h2 className="font-bold text-white text-lg">{strings.reviewTitle}</h2>
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <h2 className="font-semibold text-slate-900 text-xl">{strings.reviewTitle}</h2>
                 {isLowConf ? (
-                  <span className="text-[10px] px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-medium">
-                    Sent to Reviewer
+                  <span className="text-xs px-2.5 py-1 rounded border bg-amber-50 text-amber-800 border-amber-200 font-medium">
+                    A staff member will verify the scan
                   </span>
                 ) : (
-                  <span className="text-[10px] px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">
-                    Ready for Doctor
+                  <span className="text-xs px-2.5 py-1 rounded border bg-emerald-50 text-emerald-800 border-emerald-200 font-medium">
+                    Ready for the doctor
                   </span>
                 )}
               </div>
 
-              {/* Patient info */}
               {patient && (
-                <div className="p-3.5 rounded-xl bg-[#1a1f2a] border border-white/5 flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-sm font-bold shrink-0">
+                <div className="clinical-card p-4 flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center font-semibold shrink-0" aria-hidden>
                     {patient.name.charAt(0)}
                   </div>
                   <div className="min-w-0">
-                    <p className="text-sm font-bold text-white">{patient.name}</p>
-                    <p className="text-[10px] text-slate-500">ABHA: {patient.abha_id} · {patient.age} yrs · {patient.gender}</p>
+                    <p className="font-semibold text-slate-900">{patient.name}</p>
+                    <p className="text-xs text-slate-500">ABHA: {patient.abha_id} · {patient.age} yrs · {patient.gender}</p>
                   </div>
                 </div>
               )}
 
-              {/* Red Flag */}
               {hasRedFlag && (
-                <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 flex items-start gap-3">
-                  <AlertOctagon className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+                <div className="p-4 rounded-lg bg-red-50 border border-red-200 flex items-start gap-3" role="alert">
+                  <AlertOctagon className="w-5 h-5 text-red-700 shrink-0 mt-0.5" />
                   <div>
-                    <p className="font-bold text-red-400 text-sm">Clinical Red Flag — Chest Pain</p>
-                    <p className="text-xs text-slate-400 mt-0.5">Emergency triage protocol initiated. Prioritised before OPD queue.</p>
+                    <p className="font-semibold text-red-800">Urgent symptom noted — chest pain</p>
+                    <p className="text-sm text-slate-700 mt-0.5">You will be prioritised. Please stay at the kiosk; staff have been alerted.</p>
                   </div>
                 </div>
               )}
 
-              {/* Interview Summary */}
+              {isLowConf && (
+                <div className="p-4 rounded-lg bg-amber-50 border border-amber-200 flex items-start gap-3" role="status">
+                  <AlertTriangle className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-semibold text-amber-900">Scan needs a human check</p>
+                    <p className="text-sm text-slate-700 mt-0.5">The handwriting or photo was unclear. Your visit continues — a reviewer will confirm the medicines.</p>
+                  </div>
+                </div>
+              )}
+
               {interviewHistory.length > 0 && (
                 <div className="space-y-2">
-                  <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Voice Interview</p>
+                  <p className="label-micro">Your answers</p>
                   {interviewHistory.map((item, idx) => (
-                    <div key={idx} className="p-3 rounded-xl bg-[#1a1f2a] border border-white/5">
-                      <p className="text-[10px] text-slate-500">{item.q}</p>
-                      <p className="text-sm font-medium text-teal-300 mt-0.5">{item.a}</p>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="text-[9px] text-slate-600 uppercase">Patient Reported</span>
-                        {item.confidence && (
-                          <span className="text-[9px] text-slate-600">· STT {Math.round(item.confidence * 100)}%</span>
-                        )}
-                      </div>
+                    <div key={idx} className="clinical-card p-3.5">
+                      <p className="text-xs text-slate-500">{item.q}</p>
+                      <p className="font-medium text-slate-900 mt-0.5">{item.a}</p>
                     </div>
                   ))}
                 </div>
               )}
 
-              {/* OCR Entities */}
               {extractedEntities.length > 0 && (
                 <div className="space-y-2">
-                  <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Extracted from Documents</p>
+                  <p className="label-micro">Medicines read from your document</p>
                   {ocrRawText && (
-                    <div className="p-3 rounded-xl bg-[#1a1f2a] border border-white/5">
-                      <p className="text-[10px] text-slate-500 mb-1">OCR Raw Text</p>
-                      <p className="text-xs font-mono text-slate-300">{ocrRawText}</p>
+                    <div className="clinical-card p-3.5 bg-slate-50">
+                      <p className="text-xs text-slate-500 mb-1">Exact text read</p>
+                      <p className="text-[13px] font-mono text-slate-700 break-words">{ocrRawText}</p>
                     </div>
                   )}
                   {extractedEntities.map((med, idx) => (
-                    <div key={idx} className="p-3 rounded-xl bg-[#1a1f2a] border border-white/5 flex items-center justify-between">
+                    <div key={idx} className="clinical-card p-3.5 flex items-center justify-between gap-3">
                       <div>
-                        <p className="text-sm font-bold text-white">{med.entity_name} {med.dosage && `— ${med.dosage}`}</p>
-                        <p className="text-[10px] text-slate-500">{med.frequency} · {med.source_ref}</p>
+                        <p className="font-semibold text-slate-900">{med.entity_name} {med.dosage && <span className="font-normal text-slate-600">— {med.dosage}</span>}</p>
+                        <p className="text-xs text-slate-500">{med.frequency} · {med.source_ref}</p>
                       </div>
-                      <span className={`text-[10px] px-2 py-0.5 rounded font-bold
-                        ${med.confidence >= 0.8 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'}`}>
+                      <span className={`text-xs px-2 py-0.5 rounded border font-semibold whitespace-nowrap
+                        ${med.confidence >= 0.8 ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-amber-50 text-amber-800 border-amber-200'}`}>
                         {Math.round(med.confidence * 100)}%
                       </span>
                     </div>
                   ))}
+                  <p className="text-[13px] text-slate-500">Unclear items are marked and sent for verification — never guessed.</p>
                 </div>
               )}
 
-              <button
-                onClick={handleCompleteSession}
-                className="w-full py-4 rounded-xl bg-teal-500 hover:bg-teal-400 text-white font-bold flex items-center justify-center gap-2 transition-colors"
-              >
+              <button onClick={handleCompleteSession} className="btn-primary w-full py-4 min-h-[60px] inline-flex items-center justify-center gap-2 text-base">
                 <CheckCircle2 className="w-5 h-5" />
-                <span>{strings.finishBtn}</span>
+                {strings.finishBtn}
               </button>
             </div>
           )}
 
-          {/* ══ STEP 7: COMPLETE ══════════════════════════════════════════════ */}
+          {/* COMPLETE */}
           {step === 'complete' && (
-            <div className="text-center space-y-6 animate-fadeIn">
-              <div className="w-16 h-16 rounded-full bg-emerald-500 flex items-center justify-center mx-auto">
+            <div className="text-center space-y-5 animate-fadeIn py-4">
+              <div className="w-16 h-16 rounded-full bg-emerald-600 flex items-center justify-center mx-auto" role="img" aria-label="Complete">
                 <CheckCircle2 className="w-9 h-9 text-white" />
               </div>
-
               <div>
-                <h2 className="text-2xl font-bold text-white">{strings.thankYou}</h2>
-                <p className="text-sm text-slate-400 mt-2 max-w-sm mx-auto">{strings.resetNotice}</p>
+                <h2 className="text-2xl font-semibold tracking-tight">{strings.thankYou}</h2>
+                <p className="text-[15px] text-slate-600 mt-2 max-w-md mx-auto">{strings.resetNotice}</p>
               </div>
-
               {patient && (
-                <div className="p-4 rounded-xl bg-[#1a1f2a] border border-white/5 inline-block mx-auto">
-                  <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Patient</p>
-                  <p className="font-bold text-white">{patient.name}</p>
-                  <p className="text-xs text-teal-400 font-mono">{patient.abha_id}</p>
+                <div className="clinical-card p-4 inline-block mx-auto text-left">
+                  <p className="label-micro mb-1">Patient</p>
+                  <p className="font-semibold text-slate-900">{patient.name}</p>
+                  <p className="text-sm text-teal-700 font-mono">{patient.abha_id}</p>
                 </div>
               )}
-
-              <div className="flex items-center justify-center gap-2 text-slate-500">
+              <p className="flex items-center justify-center gap-2 text-sm text-slate-500">
                 <Clock className="w-4 h-4" />
-                <span className="text-sm">Resetting in <span className="font-bold text-white">{resetCountdown}s</span></span>
-              </div>
-
-              <div className="flex justify-center gap-3">
-                <Link
-                  to="/navigator"
-                  className="px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-sm font-medium hover:bg-amber-500/20 transition-colors"
-                >
-                  Navigator View
-                </Link>
-                <Link
-                  to="/doctor"
-                  className="px-4 py-2.5 rounded-xl bg-teal-500 text-white text-sm font-bold hover:bg-teal-400 transition-colors"
-                >
-                  Doctor View
-                </Link>
+                Clearing this screen in <span className="font-semibold text-slate-900">{resetCountdown}s</span>
+              </p>
+              <div className="flex justify-center gap-2.5">
+                <Link to="/navigator" className="btn-secondary px-4 py-2.5 text-sm">Staff view</Link>
+                <Link to="/doctor" className="btn-primary px-4 py-2.5 text-sm">Doctor view</Link>
               </div>
             </div>
           )}
 
         </div>
       </main>
+
+      {/* Footer strip */}
+      <footer className="bg-white border-t border-slate-200 px-4 py-2.5">
+        <p className="max-w-3xl mx-auto text-center text-xs text-slate-500">
+          This kiosk collects history only. It does not diagnose or prescribe. Press <span className="font-semibold">Need help</span> any time.
+        </p>
+      </footer>
     </div>
   );
 };

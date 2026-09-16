@@ -42,6 +42,10 @@ class Patient(PatientCreate):
 class SessionCreate(BaseModel):
     language: str = "hi"
     abha_id: Optional[str] = None
+    patient_name: Optional[str] = None
+    patient_age: Optional[int] = None
+    patient_gender: Optional[str] = None
+    patient_phone: Optional[str] = None
 
 class Session(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -69,6 +73,7 @@ class ResponsePayload(BaseModel):
     category: str
     answer_text: str
     audio_base64: Optional[str] = None
+    idempotency_key: Optional[str] = None
 
 class InterviewTurnResult(BaseModel):
     session_id: str

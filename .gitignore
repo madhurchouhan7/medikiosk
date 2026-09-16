@@ -8,6 +8,10 @@ __pycache__/
 .venv/
 venv/
 
+# Local runtime data (patient snapshots + uploaded scans) — never commit
+data/*.json
+data/uploads/
+
 # IDE
 .vscode/
 .idea/

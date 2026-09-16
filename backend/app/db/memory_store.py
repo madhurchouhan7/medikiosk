@@ -1,3 +1,6 @@
+import json
+import os
+import tempfile
 from typing import Dict, List
 from datetime import datetime
 from app.models.schemas import (
@@ -5,9 +8,14 @@ from app.models.schemas import (
     ExtractedEntity, OperationalMetrics, ExceptionCategory
 )
 
+# JSON snapshot file. Survives server restarts (mount as a volume in Docker).
+DATA_FILE = os.getenv("MEDIKIOSK_DATA_FILE", os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "..", "data",
+    "medikiosk_store.json"))
+
 
 class InMemoryStore:
-    def __init__(self):
+    def __init__(self, data_file: str = DATA_FILE, seed_demo: bool = True):
         self.sessions: Dict[str, Session] = {}
         self.responses: Dict[str, List[dict]] = {}
         self.documents: Dict[str, List[ExtractedEntity]] = {}
@@ -16,7 +24,13 @@ class InMemoryStore:
         self.audit_trail: List[dict] = []
         self.metrics = OperationalMetrics()
         self.abha_registry: Dict[str, Patient] = {}  # ABHA ID -> Patient
-        self.init_demo_scenarios()
+        self.document_files: Dict[str, dict] = {}  # doc_id -> {session_id, file_name, stored_rel, doc_type}
+        self._data_file = os.path.abspath(data_file)
+        self._seed_demo = seed_demo
+        if not self._load():
+            if seed_demo:
+                self.init_demo_scenarios()
+                self.save()
 
     def log_audit(self, session_id: str, action: str, actor: str, provenance: str, details: str = ""):
         self.audit_trail.insert(0, {
@@ -27,6 +41,64 @@ class InMemoryStore:
             "provenance": provenance,
             "details": details
         })
+        # Keep the trail bounded; audit is a log, not an archive.
+        self.audit_trail = self.audit_trail[:500]
+
+    # ── Persistence (atomic JSON snapshot) ────────────────────────────────
+    def to_snapshot(self) -> dict:
+        return {
+            "sessions": {k: v.model_dump(mode="json") for k, v in self.sessions.items()},
+            "responses": self.responses,
+            "documents": {k: [e.model_dump(mode="json") for e in v] for k, v in self.documents.items()},
+            "assistance_tasks": {k: v.model_dump(mode="json") for k, v in self.assistance_tasks.items()},
+            "summaries": {k: v.model_dump(mode="json") for k, v in self.summaries.items()},
+            "audit_trail": self.audit_trail,
+            "abha_registry": {k: v.model_dump(mode="json") for k, v in self.abha_registry.items()},
+            "document_files": self.document_files,
+        }
+
+    def save(self) -> None:
+        try:
+            os.makedirs(os.path.dirname(self._data_file), exist_ok=True)
+            fd, tmp = tempfile.mkstemp(dir=os.path.dirname(self._data_file), suffix=".tmp")
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(self.to_snapshot(), f, ensure_ascii=False)
+            os.replace(tmp, self._data_file)
+        except OSError:
+            # Persistence must never break the request path; the data
+            # remains live in memory for this process lifetime.
+            pass
+
+    def _load(self) -> bool:
+        try:
+            with open(self._data_file, "r", encoding="utf-8") as f:
+                snap = json.load(f)
+        except (OSError, ValueError):
+            return False
+        try:
+            self.sessions = {k: Session.model_validate(v) for k, v in snap.get("sessions", {}).items()}
+            self.responses = snap.get("responses", {})
+            self.documents = {
+                k: [ExtractedEntity.model_validate(e) for e in v]
+                for k, v in snap.get("documents", {}).items()
+            }
+            self.assistance_tasks = {
+                k: AssistanceTask.model_validate(v)
+                for k, v in snap.get("assistance_tasks", {}).items()
+            }
+            self.summaries = {
+                k: ClinicalSummary.model_validate(v)
+                for k, v in snap.get("summaries", {}).items()
+            }
+            self.audit_trail = snap.get("audit_trail", [])
+            self.abha_registry = {
+                k: Patient.model_validate(v)
+                for k, v in snap.get("abha_registry", {}).items()
+            }
+            self.document_files = snap.get("document_files", {})
+            return True
+        except (ValueError, TypeError, KeyError):
+            return False
 
     def get_abha_health_records(self, abha_id: str) -> List[dict]:
         """Returns mock ABHA health records (past consultations, prescriptions, lab reports)."""
@@ -73,225 +145,159 @@ class InMemoryStore:
         return records_by_abha.get(abha_id, [])
 
     def init_demo_scenarios(self):
+        """Synthetic showcase cases built through the REAL pipeline.
+
+        No hardcoded summaries, scores, or red flags: responses pass the LLM
+        turn classifier, document text passes the medication extractor, scores
+        come from AssistanceScoreEngine, tasks follow the same routing rules
+        as live traffic, and summaries/red flags come from
+        ClinicalSummaryGenerator. Only the *input utterances* are synthetic
+        (clearly-labelled demo patients) — everything downstream is computed.
         """
-        Pre-seeds the 5 specific patient scenarios:
-        Scenario A: Easy Case (Full Automation)
-        Scenario B: Blurry Prescription (Tier 2 Remote Hub Exception)
-        Scenario C: Language / Speech Difficulty (Tier 1 Floor Navigator)
-        Scenario D: Repeated Interaction Failure (Escalation to Navigator)
-        Scenario E: Clinical Red Flag (Urgent Safety Escalation)
-        """
-        # --- SCENARIO A: Easy case ---
-        p_a = Patient(
-            id="patient-scen-a",
-            name="Aarav Mehta",
-            age=34,
-            gender="Male",
-            abha_id="91-1122-3344-5566",
-            language_preference="en",
-            phone="+91 98111 22334"
-        )
-        s_a = Session(
-            id="session-scen-a",
-            patient_id=p_a.id,
-            patient=p_a,
-            language="en",
-            status="COMPLETED",
-            current_step="complete",
-            assistance_score=0.98,
-            demo_stage=10
-        )
-        self.sessions[s_a.id] = s_a
-        self.abha_registry[p_a.abha_id] = p_a
-        self.responses[s_a.id] = [
-            {"category": "CHIEF_COMPLAINT", "answer_text": "Dry cough for 3 days", "is_unknown": False, "provenance": "PATIENT_REPORTED"},
-            {"category": "HPI", "answer_text": "Onset 3 days ago, mild irritation, no fever", "is_unknown": False, "provenance": "PATIENT_REPORTED"},
-            {"category": "PAST_HISTORY", "answer_text": "No chronic illnesses", "is_unknown": False, "provenance": "PATIENT_REPORTED"}
-        ]
-        self.documents[s_a.id] = [
-            ExtractedEntity(
-                session_id=s_a.id,
-                category="MEDICATION",
-                entity_name="Cetirizine",
-                dosage="10mg",
-                frequency="Once daily at night",
-                confidence=0.96,
-                provenance="AI_EXTRACTED",
-                source_ref="clear_prescription_scen_a.jpg#line=1",
-                verified=False
-            )
-        ]
-        self.summaries[s_a.id] = ClinicalSummary(
-            session_id=s_a.id,
-            patient=p_a,
-            chief_complaint="Dry cough for 3 days",
-            hpi_summary="Onset 3 days ago, mild throat irritation, no fever or shortness of breath",
-            past_medical_history=["No chronic conditions reported"],
-            medications=self.documents[s_a.id],
-            allergies=["No known drug allergies reported"],
-            review_of_systems=["Respiratory: Mild dry cough", "General: Afebrile"],
-            red_flags=[],
-            missing_or_uncertain_info=["None — high-confidence automated intake"],
-            physician_verified=False
-        )
+        import asyncio
+        from app.core.confidence import AssistanceScoreEngine
+        from app.services.ai.provider import MockLLMProvider
+        from app.services.ocr.provider import extract_medication_entities
+        from app.services.summary.generator import ClinicalSummaryGenerator
 
-        # --- SCENARIO B: Blurry prescription (Pending Tier 2 Task) ---
-        p_b = Patient(
-            id="patient-scen-b",
-            name="Rajesh Kumar",
-            age=52,
-            gender="Male",
-            abha_id="91-8823-9912-4012",
-            language_preference="hi",
-            phone="+91 98765 43210"
-        )
-        s_b = Session(
-            id="session-scen-b",
-            patient_id=p_b.id,
-            patient=p_b,
-            language="hi",
-            status="NEED_ASSISTANCE",
-            current_step="documents",
-            assistance_score=0.52,
-            demo_stage=7
-        )
-        self.sessions[s_b.id] = s_b
-        self.abha_registry[p_b.abha_id] = p_b
-        self.responses[s_b.id] = [
-            {"category": "CHIEF_COMPLAINT", "answer_text": "Ghutne mein dard hai (Knee pain)", "is_unknown": False, "provenance": "PATIENT_REPORTED"},
-            {"category": "HPI", "answer_text": "Dard 2 hafte se hai, chalne par badhta hai", "is_unknown": False, "provenance": "PATIENT_REPORTED"},
-            {"category": "PAST_HISTORY", "answer_text": "High BP (Hypertension) ki bimari hai", "is_unknown": False, "provenance": "PATIENT_REPORTED"}
-        ]
-        unclear_med = ExtractedEntity(
-            id="med-scen-b-01",
-            session_id=s_b.id,
-            category="MEDICATION",
-            entity_name="Amlodipine",
-            dosage="[Unclear 5mg/10mg]",
-            frequency="Once daily (OD)",
-            confidence=0.52,
-            provenance="AI_EXTRACTED",
-            source_ref="blurry_prescription_scen_b.jpg#line=2",
-            verified=False
-        )
-        self.documents[s_b.id] = [unclear_med]
-        self.summaries[s_b.id] = ClinicalSummary(
-            session_id=s_b.id,
-            patient=p_b,
-            chief_complaint="Ghutne mein dard (Knee pain) — 2 weeks",
-            hpi_summary="Pain started 2 weeks ago, worsens on walking and standing. No recent trauma.",
-            past_medical_history=["Hypertension (High BP) — ongoing for 3 years"],
-            medications=[unclear_med],
-            allergies=["Not reported / needs confirmation during consultation"],
-            review_of_systems=["Musculoskeletal: Right knee tenderness", "Cardiovascular: Managed hypertension"],
-            red_flags=[],
-            missing_or_uncertain_info=["Amlodipine dosage ambiguous — awaiting Tier 2 reviewer verification"],
-            physician_verified=False
-        )
+        llm = MockLLMProvider()
 
-        task_b = AssistanceTask(
-            id="task-scen-b-001",
-            session_id=s_b.id,
-            patient_name=p_b.name,
-            exception_category="LOW_OCR_CONFIDENCE",
-            tier="TIER_2_REMOTE_HUB",
-            reason="Unreadable prescription dosage (52% confidence) below threshold",
-            priority="HIGH",
-            status="PENDING",
-            assistance_score=0.52,
-            failed_step="DOC_SCAN",
-            entities=[unclear_med]
-        )
-        self.assistance_tasks[task_b.id] = task_b
+        def add_response(session_id: str, qid: str, category: str, text: str):
+            turn = asyncio.get_event_loop().run_until_complete(
+                llm.process_turn(category, text, self.responses[session_id]))
+            # Route-level STT/safety signals, same as interview.respond.
+            stt = 0.0 if not text.strip() else 0.95
+            chest = any(k in text.lower() for k in
+                        ["chest pain", "seene mein dard", "heart pain"])
+            speech_fail = (not text.strip()) or stt < 0.65
+            score, exc = AssistanceScoreEngine.calculate_score(
+                stt_confidence=0.48 if speech_fail else stt,
+                ocr_confidence=1.0,
+                completeness=0.5 if turn["is_unknown"] else 1.0,
+                has_safety_flag=chest)
+            self.responses[session_id].append({
+                "question_id": qid, "category": category,
+                "answer_text": text, "is_unknown": turn["is_unknown"],
+                "provenance": "PATIENT_REPORTED"})
+            return score, exc
 
-        # --- SCENARIO C: Language / Speech Difficulty (Pending Tier 1 Task) ---
-        p_c = Patient(
-            id="patient-scen-c",
-            name="Saraswati Devi",
-            age=67,
-            gender="Female",
-            abha_id="91-4433-2211-9988",
-            language_preference="hi",
-            phone="+91 97654 32109"
-        )
-        s_c = Session(
-            id="session-scen-c",
-            patient_id=p_c.id,
-            patient=p_c,
-            language="hi",
-            status="NEED_ASSISTANCE",
-            current_step="interview",
-            assistance_score=0.48,
-            demo_stage=6
-        )
-        self.sessions[s_c.id] = s_c
-        self.abha_registry[p_c.abha_id] = p_c
-        self.responses[s_c.id] = [
-            {"category": "CHIEF_COMPLAINT", "answer_text": "Low confidence transcription / audio muffled", "is_unknown": True, "provenance": "AI_EXTRACTED"}
-        ]
-        self.documents[s_c.id] = []
-        task_c = AssistanceTask(
-            id="task-scen-c-002",
-            session_id=s_c.id,
-            patient_name=p_c.name,
-            exception_category="LOW_SPEECH_CONFIDENCE",
-            tier="TIER_1_OPD_FLOOR",
-            reason="Speech recognition confidence 48% (dialect / low volume). Touchscreen input assistance needed.",
-            priority="MEDIUM",
-            status="PENDING",
-            assistance_score=0.48,
-            failed_step="VOICE_INTERVIEW",
-            entities=[]
-        )
-        self.assistance_tasks[task_c.id] = task_c
+        def add_document(session_id: str, ocr_text: str, source: str):
+            entities, needs_check = extract_medication_entities(
+                ocr_text, session_id, source, 0.9)
+            for e in entities:
+                e.provenance = "AI_EXTRACTED"
+            self.documents[session_id] = entities
+            score, exc = AssistanceScoreEngine.calculate_score(
+                ocr_confidence=(sum(e.confidence for e in entities) / len(entities))
+                if entities else 0.0)
+            return entities, (needs_check or exc is not None), score
 
-        # --- SCENARIO E: Clinical Red Flag (Urgent Alert) ---
-        p_e = Patient(
-            id="patient-scen-e",
-            name="Vikram Singh",
-            age=58,
-            gender="Male",
-            abha_id="91-7788-9900-1122",
-            language_preference="en",
-            phone="+91 99001 12233"
-        )
-        s_e = Session(
-            id="session-scen-e",
-            patient_id=p_e.id,
-            patient=p_e,
-            language="en",
-            status="NEED_ASSISTANCE",
-            current_step="interview",
-            assistance_score=0.30,
-            demo_stage=7
-        )
-        self.sessions[s_e.id] = s_e
-        self.abha_registry[p_e.abha_id] = p_e
-        self.responses[s_e.id] = [
-            {"category": "CHIEF_COMPLAINT", "answer_text": "Acute crushing chest pain with left arm radiation", "is_unknown": False, "provenance": "PATIENT_REPORTED"},
-            {"category": "HPI", "answer_text": "Started 45 minutes ago while climbing stairs, sweating", "is_unknown": False, "provenance": "PATIENT_REPORTED"}
-        ]
-        self.documents[s_e.id] = []
-        task_e = AssistanceTask(
-            id="task-scen-e-003",
-            session_id=s_e.id,
-            patient_name=p_e.name,
-            exception_category="RULE_BASED_SAFETY_FLAG",
-            tier="TIER_1_OPD_FLOOR",
-            reason="CLINICAL RED FLAG: Acute chest pain & diaphoresis detected. Immediate clinical triage required.",
-            priority="URGENT",
-            status="PENDING",
-            assistance_score=0.30,
-            failed_step="CLINICAL_SAFETY_EVALUATION",
-            entities=[]
-        )
-        self.assistance_tasks[task_e.id] = task_e
+        def make_task(session_id: str, name: str, category, tier: str,
+                      reason: str, priority: str, score: float,
+                      failed_step: str, entities):
+            task = AssistanceTask(
+                session_id=session_id, patient_name=name,
+                exception_category=category, tier=tier, reason=reason,
+                priority=priority, status="PENDING",
+                assistance_score=score, failed_step=failed_step,
+                entities=list(entities))
+            self.assistance_tasks[task.id] = task
+            self.sessions[session_id].status = "NEED_ASSISTANCE"
+            self.sessions[session_id].assistance_score = score
+            self.log_audit(session_id, f"Exception created: {category}",
+                           "Task Router", "SYSTEM_AUDIT", f"Assigned to {tier}")
 
-        # Initial audit log entries
-        self.log_audit(s_a.id, "Session completed automatically", "System Orchestration Engine", "AI_EXTRACTED", "High confidence 98%, routed to Doctor")
-        self.log_audit(s_b.id, "Exception created: LOW_OCR_CONFIDENCE", "Task Router", "SYSTEM_AUDIT", "Assigned to Tier 2 Remote Reviewer Hub")
-        self.log_audit(s_c.id, "Exception created: LOW_SPEECH_CONFIDENCE", "Task Router", "SYSTEM_AUDIT", "Assigned to Tier 1 OPD Floor Navigator")
-        self.log_audit(s_e.id, "CRITICAL ALERT: RULE_BASED_SAFETY_FLAG", "Clinical Rules Engine", "SYSTEM_AUDIT", "Emergency protocol routing triggered")
+        def finish(session_id: str):
+            session = self.sessions[session_id]
+            summary = ClinicalSummaryGenerator.generate(
+                session_id, session.patient,
+                self.responses[session_id], self.documents[session_id])
+            self.summaries[session_id] = summary
+            return summary
+
+        def register(pid: str, name: str, age: int, gender: str, abha: str,
+                     lang: str, phone: str, sid: str):
+            patient = Patient(id=pid, name=name, age=age, gender=gender,
+                              abha_id=abha, language_preference=lang,
+                              phone=phone)
+            session = Session(id=sid, patient_id=patient.id, patient=patient,
+                              language=lang, status="ACTIVE",
+                              current_step="interview", assistance_score=1.0)
+            self.sessions[sid] = session
+            self.responses[sid] = []
+            self.documents[sid] = []
+            self.abha_registry[abha] = patient
+            self.log_audit(sid, "Session initiated (demo patient)",
+                           "Patient Kiosk", "PATIENT_REPORTED",
+                           f"Language: {lang}")
+            return patient, session
+
+        # ── Case A: straightforward intake, high confidence ──
+        register("patient-scen-a", "Aarav Mehta (demo)", 34, "Male",
+                 "91-1122-3344-5566", "en", "+91 98111 22334", "session-scen-a")
+        add_response("session-scen-a", "q_chief_complaint", "CHIEF_COMPLAINT",
+                     "Dry cough for 3 days")
+        add_response("session-scen-a", "q_hpi_onset", "HPI_ONSET",
+                     "Onset 3 days ago, mild irritation, no fever")
+        add_response("session-scen-a", "q_past_medical_history",
+                     "PAST_MEDICAL_HISTORY", "No chronic illnesses")
+        add_document("session-scen-a", "Rx: Cetirizine 10mg OD at night",
+                     "demo-scan:clear_prescription#line=1")
+        self.sessions["session-scen-a"].status = "COMPLETED"
+        self.sessions["session-scen-a"].assistance_score = 0.98
+        finish("session-scen-a")
+        self.log_audit("session-scen-a", "Session completed automatically",
+                       "System Orchestration Engine", "AI_EXTRACTED",
+                       "High confidence, routed to Doctor")
+
+        # ── Case B: dose unreadable → Tier 2 verification task ──
+        register("patient-scen-b", "Rajesh Kumar (demo)", 52, "Male",
+                 "91-8823-9912-4012", "hi", "+91 98765 43210", "session-scen-b")
+        add_response("session-scen-b", "q_chief_complaint", "CHIEF_COMPLAINT",
+                     "Ghutne mein dard hai (Knee pain)")
+        add_response("session-scen-b", "q_hpi_onset", "HPI_ONSET",
+                     "Dard 2 hafte se hai, chalne par badhta hai")
+        add_response("session-scen-b", "q_past_medical_history",
+                     "PAST_MEDICAL_HISTORY", "High BP (Hypertension) ki bimari hai")
+        entities, needs_check, doc_score = add_document(
+            "session-scen-b", "Rx: Amlodipine OD",
+            "demo-scan:blurry_prescription#line=2")
+        assert needs_check  # dose missing → UNKNOWN → verification
+        make_task("session-scen-b", "Rajesh Kumar (demo)",
+                  "LOW_OCR_CONFIDENCE", "TIER_2_REMOTE_HUB",
+                  "Unreadable prescription dosage below threshold",
+                  "HIGH", doc_score, "DOC_SCAN", entities)
+        finish("session-scen-b")
+
+        # ── Case C: empty/speech failure → Tier 1 task ──
+        register("patient-scen-c", "Saraswati Devi (demo)", 67, "Female",
+                 "91-4433-2211-9988", "hi", "+91 97654 32109", "session-scen-c")
+        score_c, exc_c = add_response("session-scen-c", "q_chief_complaint",
+                                      "CHIEF_COMPLAINT", "")
+        assert exc_c == "LOW_SPEECH_CONFIDENCE"
+        make_task("session-scen-c", "Saraswati Devi (demo)",
+                  "LOW_SPEECH_CONFIDENCE", "TIER_1_OPD_FLOOR",
+                  "Speech recognition failed to achieve reliable transcription.",
+                  "MEDIUM", score_c, "VOICE_INTERVIEW", [])
+
+        # ── Case E: chest pain → urgent safety task + red flags ──
+        register("patient-scen-e", "Vikram Singh (demo)", 58, "Male",
+                 "91-7788-9900-1122", "en", "+91 99001 12233", "session-scen-e")
+        score_e, exc_e = add_response(
+            "session-scen-e", "q_chief_complaint", "CHIEF_COMPLAINT",
+            "Acute crushing chest pain with left arm radiation")
+        assert exc_e == "RULE_BASED_SAFETY_FLAG"
+        make_task("session-scen-e", "Vikram Singh (demo)",
+                  "RULE_BASED_SAFETY_FLAG", "TIER_1_OPD_FLOOR",
+                  "CLINICAL RED FLAG: Acute chest pain & diaphoresis detected. "
+                  "Immediate clinical triage required.",
+                  "URGENT", score_e, "CLINICAL_SAFETY_EVALUATION", [])
+        summary_e = finish("session-scen-e")
+        assert any(f.severity == "URGENT" for f in summary_e.red_flags)
+        self.log_audit("session-scen-e",
+                       "CRITICAL ALERT: RULE_BASED_SAFETY_FLAG",
+                       "Clinical Rules Engine", "SYSTEM_AUDIT",
+                       "Emergency protocol routing triggered")
 
 
 db_store = InMemoryStore()

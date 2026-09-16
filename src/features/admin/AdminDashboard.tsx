@@ -1,56 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Settings, Server, Database, Cpu, ShieldCheck, Activity, 
-  RefreshCw, HelpCircle, BarChart3, ChevronDown, ChevronUp, FileText, CheckCircle2
+import {
+  Settings, Server, Database, Cpu, ShieldCheck, Activity,
+  BarChart3, ChevronDown, ChevronUp
 } from 'lucide-react';
 import { OperationalMetrics } from '../../types';
-import { ApiService } from '../../services/api';
+import { ApiService, ApiError } from '../../services/api';
 
 const JUDGE_QA = [
-  {
-    q: "Isn't this just a kiosk?",
-    a: "No. The kiosk is only the patient interface. The core product is the adaptive orchestration layer: AI intake → confidence assessment → exception routing → human verification → clinician-ready summary."
-  },
-  {
-    q: "Why do we need humans if you have AI?",
-    a: "Because real-world patients and medical documents are messy. We use humans selectively for exceptions instead of paying humans to perform every routine intake."
-  },
-  {
-    q: "Why create new jobs?",
-    a: "We are not proposing one new employee per kiosk. The system is designed for shared, exception-based support. Existing hospital staff can be trained for floor assistance where appropriate, while higher-skill review can be centralized."
-  },
-  {
-    q: "Why would a hospital pay?",
-    a: "The hospital is buying workflow capacity and documentation quality, not merely hardware. The business case must be proven through reduced intake time, reduced repetitive staff work, better information organization and measurable OPD flow improvement."
-  },
-  {
-    q: "Can a pharmacy student diagnose a patient?",
-    a: "No. The proposed scope explicitly separates intake/document support from clinical decision-making. Diagnosis and treatment remain with the licensed clinician."
-  },
-  {
-    q: "What if AI gives the doctor wrong information?",
-    a: "The interface displays uncertainty and provenance. Low-confidence fields are routed for verification, and the doctor remains the final authority. The production system would require clinical validation before deployment."
-  },
-  {
-    q: "Why not use an existing telemedicine platform?",
-    a: "Telemedicine platforms primarily connect patients and clinicians. MediKiosk focuses on the pre-consultation information bottleneck inside OPD: structured intake, paper-record organization and exception-driven human support."
-  },
-  {
-    q: "What happens when the patient cannot use the kiosk?",
-    a: "The system is deliberately hybrid. A patient can be escalated to a floor navigator instead of being forced through a failed digital flow."
-  },
-  {
-    q: "What if 50 patients need human help simultaneously?",
-    a: "That is why the Assistance Score, task queue and workload dashboard are important. The pilot must measure exception rates and peak demand before fixing staffing ratios."
-  },
-  {
-    q: "Can this be used in every hospital immediately?",
-    a: "No. The SIH prototype demonstrates the architecture. Real deployment requires workflow mapping, clinical validation, privacy/security controls, interoperability work and institutional approval."
-  },
-  {
-    q: "What is your moat?",
-    a: "The strongest defensible layer is not the LLM itself. It is the hospital workflow orchestration: structured intake schema, exception taxonomy, human-task routing, auditability, operational analytics and integration into clinical workflows."
-  }
+  { q: "Isn't this just a kiosk?", a: "No. The kiosk is only the patient interface. The product is the orchestration: AI intake, confidence checks, exception routing, human verification, and a clinician-ready summary." },
+  { q: "Why do we need humans if you have AI?", a: "Patients and handwritten documents are messy. Humans handle exceptions selectively instead of performing every routine intake by hand." },
+  { q: "What if the AI gives the doctor wrong information?", a: "Uncertainty is labelled, low-confidence items are routed for verification, and the doctor remains the final authority. Deployment needs clinical validation." },
+  { q: "What happens when a patient cannot use the kiosk?", a: "The flow is hybrid by design. The case is escalated to a floor navigator rather than forcing a failed digital path." },
+  { q: "Can this be used in every hospital immediately?", a: "No. This prototype demonstrates the architecture. Real deployment needs workflow mapping, validation, privacy controls, and institutional approval." },
 ];
 
 export const AdminDashboard: React.FC = () => {
@@ -58,225 +19,151 @@ export const AdminDashboard: React.FC = () => {
   const [metrics, setMetrics] = useState<OperationalMetrics | null>(null);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [expandedQ, setExpandedQ] = useState<number | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [health, setHealth] = useState<{ ok: boolean; detail: string }>({ ok: true, detail: 'Checking…' });
 
   useEffect(() => {
     const loadData = async () => {
-      const m = await ApiService.getOperationalMetrics();
-      const logs = await ApiService.getAuditLogs();
-      setMetrics(m);
-      setAuditLogs(logs);
+      try {
+        const [m, logs] = await Promise.all([
+          ApiService.getOperationalMetrics(),
+          ApiService.getAuditLogs(),
+        ]);
+        setMetrics(m);
+        setAuditLogs(logs);
+        setLoadError(null);
+        setHealth({ ok: true, detail: 'Service running' });
+      } catch (e) {
+        const msg = e instanceof ApiError ? e.message : 'Admin data could not be loaded.';
+        setLoadError(msg);
+        setHealth({ ok: false, detail: 'Server unreachable' });
+      }
     };
     loadData();
+    const t = setInterval(loadData, 30000);
+    return () => clearInterval(t);
   }, []);
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 p-6 font-sans">
-      <div className="max-w-6xl mx-auto space-y-6">
-        
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between border-b border-slate-800 pb-5 gap-4">
-          <div className="flex items-center space-x-3">
-            <div className="w-12 h-12 rounded-2xl bg-teal-500/10 border border-teal-500/30 flex items-center justify-center text-teal-400">
-              <Settings className="w-7 h-7" />
+    <div className="min-h-screen bg-slate-50 text-slate-900">
+      <header className="bg-white border-b border-slate-200">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-white border border-slate-200 flex items-center justify-center">
+              <Settings className="w-5 h-5 text-teal-700" />
             </div>
             <div>
-              <div className="flex items-center space-x-2">
-                <h1 className="text-2xl font-bold text-white">Administration & SIH Defense Hub</h1>
-                <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-teal-500/10 text-teal-400 border border-teal-500/20">
-                  Operational Governance
-                </span>
-              </div>
-              <p className="text-xs text-slate-400">Metrics, System Health, Audit Provenance & Mentor/Judge Q&amp;A</p>
+              <h1 className="text-lg font-semibold tracking-tight">Administration</h1>
+              <p className="text-[13px] text-slate-500">Operations, audit trail, and system status</p>
             </div>
           </div>
-
-          <span className="px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-xs font-bold flex items-center space-x-1.5">
-            <Activity className="w-4 h-4" />
-            <span>Orchestration Active</span>
+          <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold w-fit ${
+            health.ok
+              ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+              : 'bg-amber-50 text-amber-800 border-amber-200'
+          }`} role="status">
+            <Activity className="w-3.5 h-3.5" /> {health.detail}
           </span>
         </div>
-
-        {/* Navigation Tabs */}
-        <div className="flex space-x-3 border-b border-slate-800 pb-2">
-          {[
-            { id: 'metrics', label: 'Operational Metrics & Impact', icon: BarChart3 },
-            { id: 'qa', label: 'SIH Mentor/Judge Defense (11 Q&As)', icon: HelpCircle },
-            { id: 'audit', label: 'DISHA / HIPAA Audit Trail', icon: ShieldCheck },
-            { id: 'infra', label: 'Local-First Infrastructure', icon: Server }
-          ].map(tab => (
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 pb-0 flex gap-2 overflow-x-auto" role="tablist" aria-label="Admin sections">
+          {([
+            { id: 'metrics', label: 'Operations', icon: BarChart3 },
+            { id: 'audit', label: 'Audit trail', icon: ShieldCheck },
+            { id: 'infra', label: 'Infrastructure', icon: Server },
+            { id: 'qa', label: 'Evaluation Q&A', icon: Settings },
+          ] as const).map(tab => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
-              className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-                activeTab === tab.id 
-                  ? 'bg-teal-500 text-slate-950 shadow-md' 
-                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+              onClick={() => setActiveTab(tab.id)}
+              role="tab"
+              aria-selected={activeTab === tab.id}
+              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap ${
+                activeTab === tab.id
+                  ? 'border-teal-700 text-teal-800'
+                  : 'border-transparent text-slate-500 hover:text-slate-800'
               }`}
             >
               <tab.icon className="w-4 h-4" />
-              <span>{tab.label}</span>
+              {tab.label}
             </button>
           ))}
         </div>
+      </header>
 
-        {/* TAB 1: OPERATIONAL METRICS & IMPACT (Section 20 of Document) */}
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6">
+        {loadError && (
+          <div className="mb-4 p-3.5 rounded-lg bg-amber-50 border border-amber-200 text-sm" role="alert">
+            <span className="font-medium text-amber-900">Live data unavailable: </span>
+            <span className="text-slate-600">{loadError}</span>
+          </div>
+        )}
         {activeTab === 'metrics' && (
-          <div className="space-y-6">
-            
-            {/* Impact Statement Banner */}
-            <div className="p-4 rounded-2xl bg-teal-500/10 border border-teal-500/30 text-teal-300 text-xs flex items-center justify-between">
-              <div>
-                <strong>SIH Impact Guideline:</strong> “We target measurable reduction in intake/documentation burden rather than unmeasured 40% throughput claims.”
-              </div>
-              <span className="text-[10px] uppercase font-bold text-teal-400 bg-teal-500/20 px-2 py-0.5 rounded">
-                Pilot Validated
-              </span>
+          <div className="space-y-5">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+              {[
+                { v: metrics ? `${Math.round(metrics.intake_completion_rate * 100)}%` : '—', l: 'Intake completion', s: 'Completed / started' },
+                { v: metrics ? `${metrics.median_intake_time_seconds}s` : '—', l: 'Median intake time', s: 'Start to summary ready' },
+                { v: metrics ? `${Math.round(metrics.exception_rate * 100)}%` : '—', l: 'Exception rate', s: 'Needed human help' },
+                { v: metrics ? `${metrics.avg_resolution_time_seconds}s` : '—', l: 'Avg. resolution', s: 'Per exception' },
+              ].map(c => (
+                <div key={c.l} className="clinical-card p-4">
+                  <div className="text-2xl font-semibold text-slate-900">{c.v}</div>
+                  <div className="text-sm font-medium text-slate-800 mt-0.5">{c.l}</div>
+                  <div className="text-xs text-slate-500">{c.s}</div>
+                </div>
+              ))}
             </div>
 
-            {/* Quick Metrics Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800">
-                <div className="text-2xl font-bold text-teal-400">94.2%</div>
-                <div className="text-[11px] font-bold text-white mt-1">Intake Completion Rate</div>
-                <div className="text-[10px] text-slate-500">Completed / started sessions</div>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800">
-                <div className="text-2xl font-bold text-teal-400">88s</div>
-                <div className="text-[11px] font-bold text-white mt-1">Median Intake Time</div>
-                <div className="text-[10px] text-slate-500">Walk-in to summary ready</div>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800">
-                <div className="text-2xl font-bold text-amber-400">11.8%</div>
-                <div className="text-[11px] font-bold text-white mt-1">Exception Rate</div>
-                <div className="text-[10px] text-slate-500">Escalated to human support</div>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800">
-                <div className="text-2xl font-bold text-teal-400">32s</div>
-                <div className="text-[11px] font-bold text-white mt-1">Resolution Time</div>
-                <div className="text-[10px] text-slate-500">Avg. time per exception</div>
-              </div>
-            </div>
-
-            {/* Detailed Metrics Table */}
-            <div className="bg-slate-950 border border-slate-800 rounded-3xl overflow-hidden shadow-xl">
-              <div className="px-6 py-3.5 border-b border-slate-800 bg-slate-900/50 font-bold text-xs text-white">
-                Detailed Metrics &amp; Operational Definitions (Section 20)
-              </div>
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-900 text-slate-400 text-[11px] uppercase tracking-wider">
-                  <tr>
-                    <th className="p-3.5 pl-6">Metric</th>
-                    <th className="p-3.5">Definition</th>
-                    <th className="p-3.5">Why it matters</th>
-                    <th className="p-3.5 pr-6 text-right">Pilot Target</th>
+            <div className="clinical-card overflow-hidden">
+              <div className="px-5 py-3.5 border-b border-slate-200 font-semibold text-sm">What we measure, and why</div>
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="text-xs uppercase tracking-wide text-slate-500 border-b border-slate-200">
+                    <th className="px-5 py-3 font-semibold">Metric</th>
+                    <th className="px-5 py-3 font-semibold hidden sm:table-cell">Definition</th>
+                    <th className="px-5 py-3 font-semibold text-right">Pilot target</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-800 text-slate-300">
-                  <tr>
-                    <td className="p-3.5 pl-6 font-bold text-white">Intake completion rate</td>
-                    <td className="p-3.5">Completed sessions / started sessions</td>
-                    <td className="p-3.5 text-slate-400">Usability and workflow success</td>
-                    <td className="p-3.5 pr-6 text-right font-mono font-bold text-teal-400">&gt; 90%</td>
-                  </tr>
-                  <tr>
-                    <td className="p-3.5 pl-6 font-bold text-white">Average intake time</td>
-                    <td className="p-3.5">Median time from start to summary</td>
-                    <td className="p-3.5 text-slate-400">Operational efficiency</td>
-                    <td className="p-3.5 pr-6 text-right font-mono font-bold text-teal-400">&lt; 90 seconds</td>
-                  </tr>
-                  <tr>
-                    <td className="p-3.5 pl-6 font-bold text-white">Exception rate</td>
-                    <td className="p-3.5">Sessions requiring human intervention / total</td>
-                    <td className="p-3.5 text-slate-400">Human workforce planning</td>
-                    <td className="p-3.5 pr-6 text-right font-mono font-bold text-amber-400">10–15%</td>
-                  </tr>
-                  <tr>
-                    <td className="p-3.5 pl-6 font-bold text-white">Exception resolution time</td>
-                    <td className="p-3.5">Time from task creation to resolution</td>
-                    <td className="p-3.5 text-slate-400">Navigator efficiency</td>
-                    <td className="p-3.5 pr-6 text-right font-mono font-bold text-teal-400">&lt; 45 seconds</td>
-                  </tr>
-                  <tr>
-                    <td className="p-3.5 pl-6 font-bold text-white">OCR correction rate</td>
-                    <td className="p-3.5">Fields corrected / OCR fields reviewed</td>
-                    <td className="p-3.5 text-slate-400">Document quality & model accuracy</td>
-                    <td className="p-3.5 pr-6 text-right font-mono font-bold text-teal-400">&lt; 10%</td>
-                  </tr>
-                  <tr>
-                    <td className="p-3.5 pl-6 font-bold text-white">AI-to-human handoff rate</td>
-                    <td className="p-3.5">Cases escalated by reason</td>
-                    <td className="p-3.5 text-slate-400">Shows where automation boundaries fail</td>
-                    <td className="p-3.5 pr-6 text-right font-mono font-bold text-teal-400">Monitored</td>
-                  </tr>
+                <tbody className="divide-y divide-slate-100 text-slate-700">
+                  {[
+                    ['Intake completion rate', 'Completed / started sessions', '> 90%'],
+                    ['Median intake time', 'Start to summary ready', '< 90 s'],
+                    ['Exception rate', 'Sessions needing human help / total', '10–15%'],
+                    ['Resolution time', 'Task created → resolved', '< 45 s'],
+                    ['OCR correction rate', 'Fields corrected / reviewed', '< 10%'],
+                  ].map(([m, d, t]) => (
+                    <tr key={m}>
+                      <td className="px-5 py-3 font-medium text-slate-900">{m}<span className="block sm:hidden text-xs font-normal text-slate-500">{d}</span></td>
+                      <td className="px-5 py-3 hidden sm:table-cell text-slate-600">{d}</td>
+                      <td className="px-5 py-3 text-right font-mono text-[13px] text-teal-800">{t}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
-
+            <p className="text-[13px] text-slate-500">Targets are pilot guides, not outcome claims. Throughput gains must be measured on site.</p>
           </div>
         )}
 
-        {/* TAB 2: SIH MENTOR / JUDGE DEFENSE (Section 22 of Document) */}
-        {activeTab === 'qa' && (
-          <div className="space-y-4">
-            <div className="text-xs text-slate-400 pb-2">
-              Official defense answers to the 11 most critical questions mentors and judges ask during SIH evaluations:
-            </div>
-
-            <div className="space-y-3">
-              {JUDGE_QA.map((item, idx) => (
-                <div key={idx} className="bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden transition-all">
-                  <button
-                    onClick={() => setExpandedQ(expandedQ === idx ? null : idx)}
-                    className="w-full p-4 text-left flex items-center justify-between hover:bg-slate-900/50 transition-colors"
-                  >
-                    <div className="flex items-center space-x-3">
-                      <span className="w-6 h-6 rounded-full bg-teal-500/10 text-teal-400 text-xs font-bold flex items-center justify-center shrink-0">
-                        {idx + 1}
-                      </span>
-                      <span className="font-bold text-sm text-white">“{item.q}”</span>
-                    </div>
-                    {expandedQ === idx ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
-                  </button>
-
-                  {expandedQ === idx && (
-                    <div className="p-4 pt-1 border-t border-slate-800/80 bg-slate-900/40 text-xs text-slate-300 leading-relaxed pl-12">
-                      <strong className="text-teal-400 font-bold block mb-1">Recommended Pitch Answer:</strong>
-                      {item.a}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* TAB 3: AUDIT LOG TRAIL (Section 10 of Document) */}
         {activeTab === 'audit' && (
-          <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 space-y-4 shadow-xl">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center space-x-2">
-                <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                <span>Live Event Provenance &amp; Compliance Audit Log</span>
+          <div className="clinical-card p-5">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200 mb-3 flex-wrap gap-2">
+              <h3 className="text-sm font-semibold flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-700" /> Event log — who did what
               </h3>
-              <span className="text-[10px] text-slate-500 font-mono">DISHA &amp; ABDM Compliant</span>
+              <span className="text-xs text-slate-500">Every AI and human action is recorded</span>
             </div>
-
-            <div className="space-y-2 font-mono text-xs">
+            <div className="space-y-2">
               {auditLogs.map((log, idx) => (
-                <div key={idx} className="p-3 rounded-xl bg-slate-900 border border-slate-800 flex flex-wrap justify-between items-center gap-2">
-                  <div className="space-y-0.5">
-                    <span className="text-slate-400">[{log.timestamp}]</span>{' '}
-                    <strong className="text-white">{log.action}</strong>{' '}
+                <div key={idx} className="p-3 rounded-lg bg-slate-50 border border-slate-200 flex flex-wrap justify-between items-center gap-2 text-[13px]">
+                  <div>
+                    <span className="text-slate-500 font-mono text-xs">[{log.timestamp}]</span>{' '}
+                    <strong className="text-slate-900 font-medium">{log.action}</strong>{' '}
                     <span className="text-slate-500">({log.details})</span>
                   </div>
-                  <div className="flex items-center space-x-2">
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-800 text-teal-400 border border-slate-700">
-                      {log.provenance}
-                    </span>
-                    <span className="text-xs font-semibold text-slate-300">{log.actor}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-medium px-2 py-0.5 rounded border bg-white text-slate-600 border-slate-200">{log.provenance}</span>
+                    <span className="text-xs text-slate-600">{log.actor}</span>
                   </div>
                 </div>
               ))}
@@ -284,44 +171,42 @@ export const AdminDashboard: React.FC = () => {
           </div>
         )}
 
-        {/* TAB 4: LOCAL-FIRST INFRASTRUCTURE (Section 18 of Document) */}
         {activeTab === 'infra' && (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-            <div className="p-6 rounded-3xl bg-slate-950 border border-slate-800 space-y-3">
-              <div className="flex items-center justify-between text-teal-400">
-                <Cpu className="w-6 h-6" />
-                <span className="text-[10px] font-bold uppercase bg-teal-500/10 px-2 py-0.5 rounded">Air-Gapped</span>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+            {[
+              { icon: Cpu, t: 'Local language processing', d: 'On-premise models keep transcripts inside the hospital network. No patient audio leaves the site in local mode.' },
+              { icon: Server, t: 'Speech and documents', d: 'Speech-to-text and OCR run locally or via configured providers, with confidence scores on every extraction.' },
+              { icon: Database, t: 'Storage and sessions', d: 'Relational records plus session cache for instant handoff between kiosk, navigator, and doctor views.' },
+            ].map(c => (
+              <div key={c.t} className="clinical-card p-5">
+                <c.icon className="w-5 h-5 text-teal-700 mb-2.5" />
+                <div className="font-semibold text-slate-900 mb-1">{c.t}</div>
+                <p className="text-sm text-slate-600 leading-relaxed">{c.d}</p>
               </div>
-              <div className="font-bold text-base text-white">Local LLM Orchestrator</div>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Runs Ollama / Llama 3 / Gemma on on-premise hardware without transmitting patient transcripts externally.
-              </p>
-            </div>
-
-            <div className="p-6 rounded-3xl bg-slate-950 border border-slate-800 space-y-3">
-              <div className="flex items-center justify-between text-teal-400">
-                <Server className="w-6 h-6" />
-                <span className="text-[10px] font-bold uppercase bg-teal-500/10 px-2 py-0.5 rounded">Local STT/OCR</span>
-              </div>
-              <div className="font-bold text-base text-white">Speech &amp; Document AI</div>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Local Whisper speech-to-text and Tesseract/Sarvam OCR engine extract medical text in under 1.5 seconds.
-              </p>
-            </div>
-
-            <div className="p-6 rounded-3xl bg-slate-950 border border-slate-800 space-y-3">
-              <div className="flex items-center justify-between text-teal-400">
-                <Database className="w-6 h-6" />
-                <span className="text-[10px] font-bold uppercase bg-teal-500/10 px-2 py-0.5 rounded">Postgres + Redis</span>
-              </div>
-              <div className="font-bold text-base text-white">Data Persistence &amp; Session State</div>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                PostgreSQL with pgvector for medical embeddings and Redis cache for instant session handoff between Kiosk and Navigator.
-              </p>
-            </div>
+            ))}
           </div>
         )}
 
+        {activeTab === 'qa' && (
+          <div className="space-y-3 max-w-3xl">
+            <p className="text-sm text-slate-600">Short answers for evaluation discussions. Plain language, no throughput claims without a pilot.</p>
+            {JUDGE_QA.map((item, idx) => (
+              <div key={idx} className="clinical-card overflow-hidden">
+                <button
+                  onClick={() => setExpandedQ(expandedQ === idx ? null : idx)}
+                  aria-expanded={expandedQ === idx}
+                  className="w-full p-4 text-left flex items-center justify-between gap-3 min-h-[56px] hover:bg-slate-50"
+                >
+                  <span className="font-medium text-[15px] text-slate-900">“{item.q}”</span>
+                  {expandedQ === idx ? <ChevronUp className="w-4 h-4 text-slate-400 shrink-0" /> : <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />}
+                </button>
+                {expandedQ === idx && (
+                  <div className="px-4 pb-4 pt-1 border-t border-slate-100 text-sm text-slate-700 leading-relaxed">{item.a}</div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

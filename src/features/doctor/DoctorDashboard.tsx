@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Stethoscope, AlertOctagon, CheckCircle2, FileText,
-  User, Check, X, Loader2, ChevronRight, Download,
-  AlertTriangle, Activity, RefreshCw, Search
+  Stethoscope, AlertOctagon, CheckCircle2,
+  Check, X, Loader2, Download,
+  AlertTriangle, RefreshCw, Search
 } from 'lucide-react';
 import type { ClinicalSummary } from '../../types';
-import { ApiService } from '../../services/api';
+import { ApiService, ApiError } from '../../services/api';
+import { useOnlineStatus } from '../../services/offline';
 
-// ─── Toast ─────────────────────────────────────────────────────────────────────
 interface Toast {
   id: string;
   type: 'success' | 'error' | 'info' | 'warning';
@@ -16,15 +16,15 @@ interface Toast {
 
 function ToastContainer({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id: string) => void }) {
   return (
-    <div className="fixed top-4 right-4 z-50 space-y-2 pointer-events-none">
+    <div className="fixed top-4 right-4 z-50 space-y-2" role="status" aria-live="polite">
       {toasts.map(t => (
-        <div key={t.id} className={`flex items-center gap-3 px-4 py-3 rounded-xl shadow-xl text-sm font-medium pointer-events-auto max-w-sm
-          ${t.type === 'success' ? 'bg-emerald-600 text-white' :
-            t.type === 'error' ? 'bg-red-600 text-white' :
-            t.type === 'warning' ? 'bg-amber-500 text-slate-900' :
-            'bg-slate-700 text-white'}`}>
-          <span className="flex-1">{t.message}</span>
-          <button onClick={() => onDismiss(t.id)} className="opacity-60 hover:opacity-100">
+        <div key={t.id} className={`flex items-center gap-3 px-4 py-3 rounded-lg shadow-raised border text-sm bg-white max-w-sm
+          ${t.type === 'success' ? 'border-slate-200 border-l-4 border-l-emerald-600' :
+            t.type === 'error' ? 'border-slate-200 border-l-4 border-l-red-600' :
+            t.type === 'warning' ? 'border-slate-200 border-l-4 border-l-amber-500' :
+            'border-slate-200 border-l-4 border-l-teal-700'}`}>
+          <span className="flex-1 text-slate-800">{t.message}</span>
+          <button onClick={() => onDismiss(t.id)} className="text-slate-400 hover:text-slate-700" aria-label="Dismiss">
             <X className="w-3.5 h-3.5" />
           </button>
         </div>
@@ -33,42 +33,34 @@ function ToastContainer({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id
   );
 }
 
-// ─── Provenance badge ──────────────────────────────────────────────────────────
 const ProvenanceBadge = ({ prov }: { prov: string }) => {
   const styles: Record<string, string> = {
-    'AI_EXTRACTED': 'bg-amber-500/10 text-amber-400 border-amber-500/20',
-    'HUMAN_VERIFIED': 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-    'PATIENT_REPORTED': 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-    'CLINICIAN_CONFIRMED': 'bg-teal-500/10 text-teal-400 border-teal-500/20',
+    'AI_EXTRACTED': 'bg-amber-50 text-amber-800 border-amber-200',
+    'HUMAN_VERIFIED': 'bg-emerald-50 text-emerald-800 border-emerald-200',
+    'PATIENT_REPORTED': 'bg-slate-100 text-slate-600 border-slate-200',
+    'CLINICIAN_CONFIRMED': 'bg-teal-50 text-teal-800 border-teal-200',
   };
   return (
-    <span className={`text-[9px] px-1.5 py-0.5 rounded border font-bold uppercase tracking-wide ${styles[prov] || 'bg-slate-700 text-slate-400'}`}>
-      {prov.replace(/_/g, ' ')}
+    <span className={`text-[11px] px-2 py-0.5 rounded border font-semibold whitespace-nowrap ${styles[prov] || 'bg-slate-100 text-slate-600 border-slate-200'}`}>
+      {prov.replace(/_/g, ' ').toLowerCase()}
     </span>
   );
 };
 
-// ─── Row component for summary table ──────────────────────────────────────────
-const SummaryRow = ({
-  label, children, prov, urgent
-}: {
-  label: string;
-  children: React.ReactNode;
-  prov?: string;
-  urgent?: boolean;
-}) => (
-  <div className={`grid grid-cols-12 gap-4 py-4 px-5 border-b border-white/5 ${urgent ? 'bg-red-500/5' : ''}`}>
-    <div className="col-span-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider pt-0.5">
-      {label}
+const Section = ({ title, prov, children, urgent }: { title: string; prov?: string; children: React.ReactNode; urgent?: boolean }) => (
+  <section className={`border-b border-slate-200 last:border-0 ${urgent ? 'bg-red-50/50' : ''}`}>
+    <div className="grid grid-cols-1 sm:grid-cols-12 gap-1 sm:gap-4 py-4 px-5">
+      <div className="sm:col-span-3">
+        <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{title}</h3>
+      </div>
+      <div className="sm:col-span-7 text-[15px] text-slate-800">{children}</div>
+      <div className="sm:col-span-2 flex sm:justify-end items-start">
+        {prov && <ProvenanceBadge prov={prov} />}
+      </div>
     </div>
-    <div className="col-span-7 text-sm text-slate-200">{children}</div>
-    <div className="col-span-2 flex justify-end">
-      {prov && <ProvenanceBadge prov={prov} />}
-    </div>
-  </div>
+  </section>
 );
 
-// ─── Patient Queue Item ────────────────────────────────────────────────────────
 interface QueueItem {
   session_id: string;
   patient_name: string;
@@ -81,7 +73,6 @@ interface QueueItem {
   physician_verified: boolean;
 }
 
-// ─── DoctorDashboard ──────────────────────────────────────────────────────────
 export const DoctorDashboard: React.FC = () => {
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string>('session-scen-b');
@@ -99,41 +90,42 @@ export const DoctorDashboard: React.FC = () => {
     setTimeout(() => setToasts(p => p.filter(t => t.id !== id)), 5000);
   }, []);
 
-  // Load patient queue
+  const [queueError, setQueueError] = useState<string | null>(null);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+  const { online } = useOnlineStatus();
+
   const loadQueue = useCallback(async () => {
     try {
       const data = await ApiService.listSummaries();
       setQueue(data as QueueItem[]);
-    } catch {
-      // silent fail — use fallback in ApiService
+      setQueueError(null);
+    } catch (e) {
+      setQueueError(e instanceof ApiError ? e.message : 'Patient list could not be loaded.');
     }
   }, []);
 
-  // Load summary for selected session
   const loadSummary = useCallback(async (sessionId: string) => {
     setIsLoading(true);
     setSummary(null);
+    setSummaryError(null);
     try {
       const data = await ApiService.getSummary(sessionId);
       setSummary(data);
-    } catch {
-      addToast('error', 'Failed to load summary');
+    } catch (e) {
+      const msg = e instanceof ApiError ? e.message : 'Summary could not be loaded.';
+      setSummaryError(msg);
+      addToast('error', `${msg} Retry when connected.`);
     } finally {
       setIsLoading(false);
     }
   }, [addToast]);
 
-  useEffect(() => {
-    loadQueue();
-  }, []);
+  useEffect(() => { loadQueue(); }, [loadQueue]);
 
   useEffect(() => {
-    if (selectedSessionId) {
-      loadSummary(selectedSessionId);
-    }
-  }, [selectedSessionId]);
+    if (selectedSessionId) loadSummary(selectedSessionId);
+  }, [selectedSessionId, loadSummary]);
 
-  // Sign-off handler
   const handleSignOff = async () => {
     if (!summary) return;
     setIsVerifying(true);
@@ -141,16 +133,15 @@ export const DoctorDashboard: React.FC = () => {
       await ApiService.verifySummary(summary.session_id, physicianNotes || 'Verified by consulting physician');
       setSummary(prev => prev ? { ...prev, physician_verified: true, physician_notes: physicianNotes } : prev);
       setShowSignOffModal(false);
-      addToast('success', 'Summary signed off — added to EHR with CLINICIAN_CONFIRMED provenance');
+      addToast('success', 'Summary signed off and marked clinician-confirmed.');
       loadQueue();
-    } catch {
-      addToast('error', 'Sign-off failed. Please try again.');
+    } catch (e) {
+      addToast('error', e instanceof ApiError ? e.message : 'Sign-off failed. Please try again.');
     } finally {
       setIsVerifying(false);
     }
   };
 
-  // FHIR export (download JSON)
   const handleFhirExport = () => {
     if (!summary) return;
     const fhir = {
@@ -196,7 +187,7 @@ export const DoctorDashboard: React.FC = () => {
     a.download = `fhir-${summary.patient.abha_id}-${summary.session_id}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    addToast('success', 'FHIR R4 Bundle downloaded');
+    addToast('success', 'FHIR R4 bundle downloaded.');
   };
 
   const filteredQueue = queue.filter(q =>
@@ -209,388 +200,335 @@ export const DoctorDashboard: React.FC = () => {
   const attentionFlags = summary?.red_flags?.filter(f => f.severity === 'ATTENTION') || [];
 
   return (
-    <div className="min-h-screen bg-[#0f1117] text-white font-sans">
+    <div className="min-h-screen bg-slate-50 text-slate-900">
       <ToastContainer toasts={toasts} onDismiss={(id) => setToasts(p => p.filter(t => t.id !== id))} />
 
-      {/* ── Header ──────────────────────────────────────────────────────────── */}
-      <header className="bg-[#151820] border-b border-white/5 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-teal-500 flex items-center justify-center">
-            <Stethoscope className="w-4 h-4 text-white" />
+      <header className="bg-white border-b border-slate-200 px-4 sm:px-6 py-3.5">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg bg-teal-700 flex items-center justify-center">
+              <Stethoscope className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h1 className="text-base font-semibold text-slate-900 leading-tight">Doctor — clinical intake</h1>
+              <p className="text-xs text-slate-500">Review before consultation · verify, don&apos;t re-type</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-base font-bold text-white">Doctor — Clinical Intake</h1>
-            <p className="text-[10px] text-slate-500">Pre-consultation summary portal</p>
+          <div className="flex items-center gap-2">
+            {!online && (
+              <span className="text-xs px-2.5 py-1 rounded border font-semibold bg-amber-50 text-amber-800 border-amber-200" role="alert">
+                Offline — showing last loaded data
+              </span>
+            )}
+            {summary && !summary.physician_verified && (
+              <button onClick={() => setShowSignOffModal(true)} className="btn-primary inline-flex items-center gap-2 px-4 py-2.5 text-sm">
+                <Check className="w-4 h-4" /> Sign off
+              </button>
+            )}
+            {summary?.physician_verified && (
+              <span className="inline-flex items-center gap-1.5 text-sm text-emerald-700 font-medium">
+                <CheckCircle2 className="w-4 h-4" /> Clinician-confirmed
+              </span>
+            )}
+            {summary && (
+              <button onClick={handleFhirExport} className="btn-secondary inline-flex items-center gap-1.5 px-3 py-2.5 text-[13px]">
+                <Download className="w-3.5 h-3.5" /> FHIR export
+              </button>
+            )}
+            <button onClick={() => selectedSessionId && loadSummary(selectedSessionId)} className="btn-secondary p-2.5" aria-label="Reload summary">
+              <RefreshCw className="w-4 h-4" />
+            </button>
           </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {summary && !summary.physician_verified && (
-            <button
-              onClick={() => setShowSignOffModal(true)}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-teal-500 hover:bg-teal-400 text-white text-sm font-bold transition-colors"
-            >
-              <Check className="w-4 h-4" />
-              Sign Off
-            </button>
-          )}
-          {summary?.physician_verified && (
-            <span className="flex items-center gap-1.5 text-xs text-emerald-400 font-medium">
-              <CheckCircle2 className="w-4 h-4" />
-              Clinician Confirmed
-            </span>
-          )}
-          {summary && (
-            <button
-              onClick={handleFhirExport}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 text-xs font-medium transition-colors"
-            >
-              <Download className="w-3.5 h-3.5" />
-              FHIR Export
-            </button>
-          )}
-          <button
-            onClick={() => selectedSessionId && loadSummary(selectedSessionId)}
-            className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 transition-colors"
-          >
-            <RefreshCw className="w-4 h-4" />
-          </button>
         </div>
       </header>
 
-      <div className="flex h-[calc(100vh-57px)]">
-
-        {/* ── Left: Patient Queue ──────────────────────────────────────────── */}
-        <aside className="w-72 shrink-0 border-r border-white/5 flex flex-col bg-[#151820]">
-          <div className="p-4 border-b border-white/5">
+      <div className="flex flex-col lg:flex-row min-h-[calc(100vh-65px)]">
+        {/* Queue */}
+        <aside className="w-full lg:w-80 shrink-0 border-b lg:border-b-0 lg:border-r border-slate-200 bg-white flex flex-col">
+          <div className="p-3.5 border-b border-slate-200">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               <input
-                type="text"
+                type="search"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                placeholder="Search patients..."
-                className="w-full pl-9 pr-3 py-2 rounded-lg bg-white/5 border border-white/5 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-teal-500/40"
+                placeholder="Search name or ABHA…"
+                aria-label="Search patients"
+                className="clinical-input pl-9 pr-3 py-2.5 text-sm"
               />
             </div>
+            <p className="text-xs text-slate-500 mt-2">{filteredQueue.length} waiting · urgent first</p>
           </div>
-
-          <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
-            {filteredQueue.length === 0 && (
-              <div className="text-center py-12 text-slate-600 text-sm">No patients in queue</div>
+          <div className="flex-1 overflow-y-auto thin-scroll p-3 space-y-2 max-h-72 lg:max-h-none">
+            {queueError && (
+              <div className="p-3.5 rounded-lg bg-amber-50 border border-amber-200 text-sm" role="alert">
+                <p className="font-medium text-amber-900">Patient list unavailable</p>
+                <p className="text-[13px] text-slate-600 mt-0.5">{queueError}</p>
+                <button onClick={loadQueue} className="btn-secondary mt-2.5 px-4 py-2 min-h-[44px] text-[13px] w-full">Retry</button>
+              </div>
             )}
-            {filteredQueue.map(item => (
-              <button
-                key={item.session_id}
-                onClick={() => setSelectedSessionId(item.session_id)}
-                className={`w-full text-left p-3.5 rounded-xl border transition-all ${
-                  selectedSessionId === item.session_id
-                    ? 'bg-teal-500/10 border-teal-500/30'
-                    : 'bg-white/3 border-white/5 hover:bg-white/6'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <span className="font-bold text-white text-sm truncate">{item.patient_name}</span>
-                  <span className={`text-[10px] font-bold ${
-                    item.assistance_score < 0.5 ? 'text-red-400' :
-                    item.assistance_score < 0.85 ? 'text-amber-400' : 'text-emerald-400'
-                  }`}>{Math.round(item.assistance_score * 100)}%</span>
-                </div>
-                <p className="text-[11px] text-slate-500 truncate">{item.chief_complaint}</p>
-                <div className="flex items-center gap-1.5 mt-1.5">
-                  <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${
-                    item.status === 'COMPLETED' ? 'bg-emerald-500/10 text-emerald-400' :
-                    item.status === 'NEED_ASSISTANCE' ? 'bg-amber-500/10 text-amber-400' :
-                    'bg-blue-500/10 text-blue-400'
-                  }`}>
-                    {item.status?.replace(/_/g, ' ')}
-                  </span>
-                  {item.physician_verified && (
-                    <CheckCircle2 className="w-3 h-3 text-teal-400" />
-                  )}
-                </div>
-              </button>
-            ))}
+            {filteredQueue.length === 0 && !queueError && (
+              <div className="text-center py-10 text-slate-500 text-sm">No patients match this search.</div>
+            )}
+            {filteredQueue.map(item => {
+              const urgent = item.chief_complaint.toLowerCase().includes('chest') || item.assistance_score < 0.5;
+              return (
+                <button
+                  key={item.session_id}
+                  onClick={() => setSelectedSessionId(item.session_id)}
+                  aria-pressed={selectedSessionId === item.session_id}
+                  className={`w-full text-left p-3.5 rounded-lg border transition-colors ${
+                    selectedSessionId === item.session_id
+                      ? 'bg-teal-50 border-teal-700'
+                      : 'bg-white border-slate-200 hover:border-slate-400'
+                  } ${urgent ? 'border-l-4 border-l-red-600' : ''}`}
+                >
+                  <div className="flex items-center justify-between gap-2 mb-0.5">
+                    <span className="font-semibold text-slate-900 text-[15px] truncate">{item.patient_name}</span>
+                    <span className={`text-xs font-semibold whitespace-nowrap ${
+                      item.assistance_score < 0.65 ? 'text-red-700' :
+                      item.assistance_score < 0.85 ? 'text-amber-700' : 'text-emerald-700'
+                    }`}>{Math.round(item.assistance_score * 100)}%</span>
+                  </div>
+                  <p className="text-[13px] text-slate-600 truncate">{item.chief_complaint}</p>
+                  <div className="flex items-center gap-1.5 mt-1.5">
+                    <span className={`text-[11px] px-1.5 py-0.5 rounded border font-medium ${
+                      item.status === 'COMPLETED' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' :
+                      item.status === 'NEED_ASSISTANCE' ? 'bg-amber-50 text-amber-800 border-amber-200' :
+                      'bg-slate-100 text-slate-600 border-slate-200'
+                    }`}>
+                      {item.status?.replace(/_/g, ' ').toLowerCase()}
+                    </span>
+                    {item.physician_verified && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" aria-label="Verified" />}
+                    <span className="text-[11px] text-slate-400 ml-auto">{item.age}y · {item.gender}</span>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </aside>
 
-        {/* ── Right: Summary Viewer ────────────────────────────────────────── */}
-        <main className="flex-1 overflow-y-auto">
+        {/* Summary */}
+        <main className="flex-1 overflow-y-auto thin-scroll">
           {isLoading ? (
-            <div className="h-full flex items-center justify-center">
-              <div className="text-center space-y-3">
-                <Loader2 className="w-8 h-8 text-teal-400 animate-spin mx-auto" />
-                <p className="text-sm text-slate-500">Loading patient summary...</p>
+            <div className="h-full flex items-center justify-center py-20" role="status">
+              <div className="text-center">
+                <Loader2 className="w-8 h-8 text-teal-700 animate-spin mx-auto" />
+                <p className="text-sm text-slate-500 mt-3">Loading patient summary…</p>
+              </div>
+            </div>
+          ) : summaryError ? (
+            <div className="h-full flex items-center justify-center py-20 text-sm px-4">
+              <div className="text-center max-w-sm">
+                <AlertTriangle className="w-10 h-10 mx-auto text-amber-600" />
+                <p className="font-medium text-slate-900 mt-2">Summary unavailable</p>
+                <p className="text-slate-500 mt-1">{summaryError}</p>
+                <button onClick={() => selectedSessionId && loadSummary(selectedSessionId)} className="btn-secondary mt-4 px-4 py-2.5 min-h-[48px] text-sm">Retry</button>
               </div>
             </div>
           ) : !summary ? (
-            <div className="h-full flex items-center justify-center text-slate-600 text-sm">
-              <div className="text-center space-y-2">
-                <Stethoscope className="w-10 h-10 mx-auto opacity-30" />
-                <p>Select a patient to view their intake summary</p>
+            <div className="h-full flex items-center justify-center py-20 text-slate-500 text-sm">
+              <div className="text-center">
+                <Stethoscope className="w-10 h-10 mx-auto text-slate-300" />
+                <p className="mt-2">Select a patient to view their intake summary.</p>
               </div>
             </div>
           ) : (
-            <div className="max-w-4xl mx-auto p-6 space-y-5">
-
-              {/* Patient demographics */}
-              <div className="p-4 rounded-xl bg-[#151820] border border-white/5 flex items-center gap-4">
-                <div className="w-12 h-12 rounded-full bg-slate-700 flex items-center justify-center text-lg font-bold text-white shrink-0">
+            <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-4">
+              {/* Patient strip */}
+              <div className="clinical-card p-4 flex items-center gap-4">
+                <div className="w-12 h-12 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-lg font-semibold shrink-0" aria-hidden>
                   {summary.patient.name.charAt(0)}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h2 className="text-lg font-bold text-white">{summary.patient.name}</h2>
-                  <div className="flex items-center gap-3 text-xs text-slate-400 flex-wrap">
-                    <span>{summary.patient.age} yrs · {summary.patient.gender}</span>
-                    <span>·</span>
-                    <span className="font-mono text-teal-400">ABHA: {summary.patient.abha_id}</span>
-                    <span>·</span>
-                    <span>{summary.patient.language_preference?.toUpperCase()}</span>
-                    {summary.patient.phone && <span>· {summary.patient.phone}</span>}
-                  </div>
+                  <h2 className="text-lg font-semibold text-slate-900">{summary.patient.name}</h2>
+                  <p className="text-[13px] text-slate-500">
+                    {summary.patient.age} yrs · {summary.patient.gender} · <span className="font-mono">ABHA {summary.patient.abha_id}</span>
+                    {summary.patient.phone && <span> · {summary.patient.phone}</span>}
+                  </p>
                 </div>
                 {summary.physician_verified && (
-                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                    <span className="text-xs text-emerald-400 font-medium">Verified</span>
-                  </div>
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 font-medium">
+                    <CheckCircle2 className="w-4 h-4" /> Verified
+                  </span>
                 )}
               </div>
 
-              {/* Red Flags */}
+              {/* Red flags first */}
               {urgentFlags.length > 0 && (
-                <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <AlertOctagon className="w-4 h-4 text-red-400" />
-                    <span className="text-sm font-bold text-red-400">URGENT — Clinical Red Flags</span>
+                <div className="p-4 rounded-lg bg-red-50 border border-red-200" role="alert">
+                  <div className="flex items-center gap-2 mb-2">
+                    <AlertOctagon className="w-4 h-4 text-red-700" />
+                    <span className="text-sm font-semibold text-red-800">Urgent — review before anything else</span>
                   </div>
                   {urgentFlags.map((f, i) => (
-                    <div key={i} className="pl-6 space-y-0.5">
-                      <p className="text-sm font-medium text-white">{f.symptom}</p>
-                      <p className="text-xs text-slate-400">{f.message}</p>
-                      <p className="text-xs text-red-300 font-medium">→ {f.action_required}</p>
+                    <div key={i} className="py-1.5 border-t border-red-100 first:border-0">
+                      <p className="text-[15px] font-semibold text-slate-900">{f.symptom}</p>
+                      <p className="text-sm text-slate-700">{f.message}</p>
+                      <p className="text-sm text-red-800 font-medium mt-0.5">Action: {f.action_required}</p>
                     </div>
                   ))}
                 </div>
               )}
               {attentionFlags.length > 0 && (
-                <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <AlertTriangle className="w-4 h-4 text-amber-400" />
-                    <span className="text-sm font-bold text-amber-400">Attention — Risk Factors</span>
+                <div className="p-4 rounded-lg bg-amber-50 border border-amber-200">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <AlertTriangle className="w-4 h-4 text-amber-700" />
+                    <span className="text-sm font-semibold text-amber-900">Attention — risk factors</span>
                   </div>
                   {attentionFlags.map((f, i) => (
-                    <div key={i} className="pl-6">
-                      <span className="text-sm font-medium text-white">{f.symptom}: </span>
-                      <span className="text-sm text-slate-400">{f.message}</span>
-                      <p className="text-xs text-amber-300 mt-0.5">→ {f.action_required}</p>
+                    <div key={i} className="py-1">
+                      <span className="text-sm font-medium text-slate-900">{f.symptom}: </span>
+                      <span className="text-sm text-slate-700">{f.message}</span>
+                      <p className="text-[13px] text-amber-800 mt-0.5">Action: {f.action_required}</p>
                     </div>
                   ))}
                 </div>
               )}
 
-              {/* AI disclaimer */}
-              <div className="flex items-center gap-2 py-2 px-3 rounded-lg bg-white/3 border border-white/5 text-[11px] text-slate-500">
-                <Activity className="w-3.5 h-3.5 text-teal-400 shrink-0" />
-                <span>{summary.disclaimer}</span>
+              {/* 60-second brief */}
+              <div className="clinical-card p-5 border-l-4 border-l-teal-700">
+                <p className="label-micro mb-1.5">60-second brief</p>
+                <p className="text-base font-semibold text-slate-900 leading-snug">{summary.chief_complaint}</p>
+                <p className="text-[15px] text-slate-700 leading-relaxed mt-1.5">{summary.hpi_summary}</p>
+                <div className="flex flex-wrap gap-x-5 gap-y-1 mt-3 text-[13px] text-slate-600">
+                  <span><strong className="text-slate-900">Medicines:</strong> {summary.medications.length ? summary.medications.map(m => `${m.entity_name}${m.dosage ? ' ' + m.dosage : ''}`).join(', ') : 'none reported'}</span>
+                  <span><strong className="text-slate-900">Allergies:</strong> {summary.allergies.join(', ')}</span>
+                </div>
+                {summary.missing_or_uncertain_info.length > 0 && (
+                  <p className="text-[13px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-2.5 py-1.5 mt-3">
+                    Still uncertain: {summary.missing_or_uncertain_info.join(' · ')}
+                  </p>
+                )}
               </div>
 
-              {/* Summary Table */}
-              <div className="rounded-xl bg-[#151820] border border-white/5 overflow-hidden">
-                <div className="px-5 py-3 border-b border-white/5 flex items-center justify-between">
-                  <span className="text-[11px] font-bold text-teal-400 uppercase tracking-wider">Clinical Intake — SOAP Format</span>
-                  <span className="text-[10px] text-slate-600">Full provenance enabled</span>
-                </div>
+              <p className="text-[13px] text-slate-500 border border-slate-200 bg-white rounded-lg px-3.5 py-2.5">{summary.disclaimer}</p>
 
-                {/* 1. Chief Complaint */}
-                <SummaryRow label="Chief Complaint" prov="PATIENT_REPORTED">
-                  <span className="font-bold text-white text-base">{summary.chief_complaint}</span>
-                </SummaryRow>
-
-                {/* 2. HPI / SOCRATES Narrative & Breakdown */}
-                <SummaryRow label="HPI (SOCRATES)" prov="PATIENT_REPORTED">
-                  <div className="space-y-3">
-                    <p className="text-slate-200 leading-relaxed font-medium">{summary.hpi_summary}</p>
+              {/* Full structured record */}
+              <details className="clinical-card overflow-hidden" open>
+                <summary className="px-5 py-3.5 text-sm font-semibold text-slate-800 cursor-pointer hover:bg-slate-50 min-h-[48px]">
+                  Full structured record — 13 clinical sections
+                </summary>
+                <div>
+                  <Section title="1 · Chief complaint" prov="PATIENT_REPORTED">
+                    <span className="font-semibold text-slate-900 text-base">{summary.chief_complaint}</span>
+                  </Section>
+                  <Section title="2 · History of present illness" prov="PATIENT_REPORTED">
+                    <p className="leading-relaxed">{summary.hpi_summary}</p>
                     {summary.socrates_breakdown && Object.keys(summary.socrates_breakdown).length > 0 && (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-3 rounded-xl bg-white/3 border border-white/5 text-xs">
+                      <dl className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3 p-3 rounded-lg bg-slate-50 border border-slate-200 text-sm">
                         {Object.entries(summary.socrates_breakdown).map(([dim, val]) => (
-                          <div key={dim} className="space-y-0.5">
-                            <span className="text-[10px] text-teal-400 font-bold uppercase">{dim}:</span>
-                            <p className="text-slate-300">{val}</p>
+                          <div key={dim}>
+                            <dt className="text-xs text-teal-800 font-semibold uppercase">{dim}</dt>
+                            <dd className="text-slate-700">{val}</dd>
+                          </div>
+                        ))}
+                      </dl>
+                    )}
+                  </Section>
+                  {summary.previous_treatment && summary.previous_treatment.length > 0 && (
+                    <Section title="3 · Previous treatment (this episode)" prov="PATIENT_REPORTED">
+                      <ul className="list-disc pl-5 space-y-1">{summary.previous_treatment.map((t, i) => <li key={i}>{t}</li>)}</ul>
+                    </Section>
+                  )}
+                  <Section title="4 · Past medical history" prov="PATIENT_REPORTED">
+                    <ul className="list-disc pl-5 space-y-1">{summary.past_medical_history.map((h, i) => <li key={i}>{h}</li>)}</ul>
+                  </Section>
+                  {summary.past_surgical_history && summary.past_surgical_history.length > 0 && (
+                    <Section title="5 · Surgical / hospitalisation" prov="PATIENT_REPORTED">
+                      <ul className="list-disc pl-5 space-y-1">{summary.past_surgical_history.map((s, i) => <li key={i}>{s}</li>)}</ul>
+                    </Section>
+                  )}
+                  <Section title="6 · Current medicines" prov={summary.medications[0]?.provenance || 'PATIENT_REPORTED'}>
+                    {summary.medications.length === 0 ? (
+                      <span className="text-slate-500 italic">No regular medicines reported or extracted.</span>
+                    ) : (
+                      <div className="space-y-2">
+                        {summary.medications.map((m, i) => (
+                          <div key={i} className="p-3 rounded-lg bg-slate-50 border border-slate-200 flex items-start justify-between gap-3">
+                            <div>
+                              <span className="font-semibold text-slate-900">{m.entity_name}</span>
+                              {m.dosage && <span className="text-slate-600"> {m.dosage}</span>}
+                              {m.frequency && <p className="text-[13px] text-slate-500 mt-0.5">{m.frequency}</p>}
+                              <p className="text-xs text-slate-400 mt-0.5 font-mono">{m.source_ref} · {Math.round(m.confidence * 100)}%</p>
+                            </div>
+                            <div className="flex flex-col items-end gap-1 shrink-0">
+                              <ProvenanceBadge prov={m.provenance} />
+                              {m.verified_by && <span className="text-[11px] text-slate-500">{m.verified_by}</span>}
+                            </div>
                           </div>
                         ))}
                       </div>
                     )}
-                  </div>
-                </SummaryRow>
-
-                {/* 3. Previous Treatment for this Episode */}
-                {summary.previous_treatment && summary.previous_treatment.length > 0 && (
-                  <SummaryRow label="Prior Treatment" prov="PATIENT_REPORTED">
-                    <ul className="space-y-1">
-                      {summary.previous_treatment.map((t, i) => (
-                        <li key={i} className="text-slate-300">• {t}</li>
-                      ))}
-                    </ul>
-                  </SummaryRow>
-                )}
-
-                {/* 4. Past Medical History */}
-                <SummaryRow label="Past Medical" prov="PATIENT_REPORTED">
-                  <ul className="space-y-1">
-                    {summary.past_medical_history.map((h, i) => (
-                      <li key={i} className="text-slate-300">• {h}</li>
-                    ))}
-                  </ul>
-                </SummaryRow>
-
-                {/* 5. Past Surgical & Hospitalization */}
-                {summary.past_surgical_history && summary.past_surgical_history.length > 0 && (
-                  <SummaryRow label="Past Surgical" prov="PATIENT_REPORTED">
-                    <ul className="space-y-1">
-                      {summary.past_surgical_history.map((s, i) => (
-                        <li key={i} className="text-slate-300">• {s}</li>
-                      ))}
-                    </ul>
-                  </SummaryRow>
-                )}
-
-                {/* 6. Current Medications (OCR + Reported) */}
-                <SummaryRow label="Medications" prov={summary.medications[0]?.provenance || "PATIENT_REPORTED"}>
-                  <div className="space-y-2">
-                    {summary.medications.length === 0 ? (
-                      <span className="text-slate-500 italic">No regular medications extracted or reported</span>
-                    ) : summary.medications.map((m, i) => (
-                      <div key={i} className="p-2.5 rounded-lg bg-white/3 border border-white/5 flex items-center justify-between gap-3">
-                        <div>
-                          <span className="font-bold text-white">{m.entity_name}</span>
-                          {m.dosage && <span className="text-slate-400"> {m.dosage}</span>}
-                          {m.frequency && <p className="text-[11px] text-slate-500 mt-0.5">{m.frequency}</p>}
-                          <p className="text-[10px] text-slate-600 mt-0.5 font-mono">{m.source_ref}</p>
-                        </div>
-                        <div className="flex flex-col items-end gap-1">
-                          <ProvenanceBadge prov={m.provenance} />
-                          {m.verified_by && (
-                            <span className="text-[9px] text-slate-600">{m.verified_by}</span>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </SummaryRow>
-
-                {/* 7. Allergies */}
-                <SummaryRow label="Allergies" prov="PATIENT_REPORTED">
-                  <span className={summary.allergies[0]?.includes('Allergic') ? 'text-red-400 font-bold' : 'text-slate-300'}>
-                    {summary.allergies.join(', ')}
-                  </span>
-                </SummaryRow>
-
-                {/* 8. Family History */}
-                {summary.family_history && summary.family_history.length > 0 && (
-                  <SummaryRow label="Family History" prov="PATIENT_REPORTED">
-                    <ul className="space-y-1">
-                      {summary.family_history.map((f, i) => (
-                        <li key={i} className="text-slate-300">• {f}</li>
-                      ))}
-                    </ul>
-                  </SummaryRow>
-                )}
-
-                {/* 9. Personal & Social History */}
-                {summary.personal_social_history && summary.personal_social_history.length > 0 && (
-                  <SummaryRow label="Personal/Social" prov="PATIENT_REPORTED">
-                    <ul className="space-y-1">
-                      {summary.personal_social_history.map((p, i) => (
-                        <li key={i} className="text-slate-300">• {p}</li>
-                      ))}
-                    </ul>
-                  </SummaryRow>
-                )}
-
-                {/* 10. Review of Systems */}
-                <SummaryRow label="System Review" prov="PATIENT_REPORTED">
-                  <ul className="space-y-1">
-                    {summary.review_of_systems.map((s, i) => (
-                      <li key={i} className="text-slate-300">• {s}</li>
-                    ))}
-                  </ul>
-                </SummaryRow>
-
-                {/* 11. Previous Investigations / Records */}
-                {summary.previous_investigations && summary.previous_investigations.length > 0 && (
-                  <SummaryRow label="Prior Reports" prov="PATIENT_REPORTED">
-                    <ul className="space-y-1">
-                      {summary.previous_investigations.map((r, i) => (
-                        <li key={i} className="text-slate-300">• {r}</li>
-                      ))}
-                    </ul>
-                  </SummaryRow>
-                )}
-
-                {/* 12. Gaps / Uncertain Items */}
-                {summary.missing_or_uncertain_info.length > 0 && (
-                  <SummaryRow label="Gaps / Uncertainty" prov="HUMAN_VERIFIED">
-                    <ul className="space-y-1">
-                      {summary.missing_or_uncertain_info.map((item, i) => (
-                        <li key={i} className="text-amber-300">• {item}</li>
-                      ))}
-                    </ul>
-                  </SummaryRow>
-                )}
-
-                {summary.physician_notes && (
-                  <SummaryRow label="Doctor Notes" prov="CLINICIAN_CONFIRMED">
-                    <span className="text-teal-300 italic">{summary.physician_notes}</span>
-                  </SummaryRow>
-                )}
-              </div>
-
+                  </Section>
+                  <Section title="7 · Allergies" prov="PATIENT_REPORTED">
+                    <span className={summary.allergies[0]?.toLowerCase().includes('allerg') && !summary.allergies[0]?.toLowerCase().includes('no known') ? 'text-red-800 font-semibold' : ''}>
+                      {summary.allergies.join(', ')}
+                    </span>
+                  </Section>
+                  {summary.family_history && summary.family_history.length > 0 && (
+                    <Section title="8 · Family history" prov="PATIENT_REPORTED">
+                      <ul className="list-disc pl-5 space-y-1">{summary.family_history.map((f, i) => <li key={i}>{f}</li>)}</ul>
+                    </Section>
+                  )}
+                  {summary.personal_social_history && summary.personal_social_history.length > 0 && (
+                    <Section title="9 · Personal / social" prov="PATIENT_REPORTED">
+                      <ul className="list-disc pl-5 space-y-1">{summary.personal_social_history.map((p, i) => <li key={i}>{p}</li>)}</ul>
+                    </Section>
+                  )}
+                  <Section title="10 · Review of systems" prov="PATIENT_REPORTED">
+                    <ul className="list-disc pl-5 space-y-1">{summary.review_of_systems.map((s, i) => <li key={i}>{s}</li>)}</ul>
+                  </Section>
+                  {summary.previous_investigations && summary.previous_investigations.length > 0 && (
+                    <Section title="11 · Previous investigations" prov="PATIENT_REPORTED">
+                      <ul className="list-disc pl-5 space-y-1">{summary.previous_investigations.map((r, i) => <li key={i}>{r}</li>)}</ul>
+                    </Section>
+                  )}
+                  {summary.missing_or_uncertain_info.length > 0 && (
+                    <Section title="12 · Gaps / uncertainty" prov="HUMAN_VERIFIED" urgent>
+                      <ul className="list-disc pl-5 space-y-1 text-amber-900">{summary.missing_or_uncertain_info.map((item, i) => <li key={i}>{item}</li>)}</ul>
+                    </Section>
+                  )}
+                  {summary.physician_notes && (
+                    <Section title="13 · Doctor notes" prov="CLINICIAN_CONFIRMED">
+                      <span className="italic text-teal-900">{summary.physician_notes}</span>
+                    </Section>
+                  )}
+                </div>
+              </details>
             </div>
           )}
         </main>
       </div>
 
-      {/* ── Sign-Off Modal ───────────────────────────────────────────────────── */}
       {showSignOffModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-[#151820] border border-white/10 rounded-2xl p-6 w-full max-w-md space-y-4 shadow-2xl">
+        <div className="fixed inset-0 bg-slate-900/40 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Sign off summary">
+          <div className="bg-white border border-slate-200 rounded-lg p-6 w-full max-w-md space-y-4 shadow-raised">
             <div className="flex items-center justify-between">
-              <h3 className="font-bold text-white">Sign Off Clinical Summary</h3>
-              <button onClick={() => setShowSignOffModal(false)} className="text-slate-500 hover:text-white">
+              <h3 className="font-semibold text-slate-900">Sign off this summary</h3>
+              <button onClick={() => setShowSignOffModal(false)} className="text-slate-400 hover:text-slate-700" aria-label="Close">
                 <X className="w-5 h-5" />
               </button>
             </div>
-
-            <p className="text-sm text-slate-400">
-              Signing off confirms this summary is clinically accurate. It will be marked as <span className="text-teal-400 font-medium">CLINICIAN_CONFIRMED</span> in the audit trail.
+            <p className="text-sm text-slate-600">
+              Signing off records your clinical acceptance. The summary becomes <span className="font-medium text-teal-800">clinician-confirmed</span> in the audit trail.
             </p>
-
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-slate-500">Physician Notes (optional)</label>
+            <div className="space-y-1.5">
+              <label htmlFor="phys-notes" className="label-micro">Physician notes (optional)</label>
               <textarea
+                id="phys-notes"
                 value={physicianNotes}
                 onChange={e => setPhysicianNotes(e.target.value)}
-                placeholder="e.g., Reviewed and accepted. Refer for knee X-ray."
+                placeholder="e.g. Reviewed. Refer for knee X-ray, check BP."
                 rows={3}
-                className="w-full px-3 py-2.5 rounded-lg bg-[#0f1117] border border-white/10 text-white text-sm focus:border-teal-500/60 focus:outline-none resize-none"
+                className="clinical-input px-3 py-2.5 text-sm resize-none"
               />
             </div>
-
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowSignOffModal(false)}
-                className="flex-1 py-2.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 text-sm transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSignOff}
-                disabled={isVerifying}
-                className="flex-1 py-2.5 rounded-lg bg-teal-500 hover:bg-teal-400 text-white font-bold text-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
-              >
+            <div className="flex gap-2.5">
+              <button onClick={() => setShowSignOffModal(false)} className="btn-secondary flex-1 py-2.5 text-sm">Cancel</button>
+              <button onClick={handleSignOff} disabled={isVerifying} className="btn-primary flex-1 py-2.5 text-sm inline-flex items-center justify-center gap-2">
                 {isVerifying ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                {isVerifying ? 'Saving...' : 'Confirm Sign-Off'}
+                {isVerifying ? 'Saving…' : 'Confirm sign-off'}
               </button>
             </div>
           </div>

@@ -9,10 +9,10 @@ class BaseLLMProvider(ABC):
 
 class MockLLMProvider(BaseLLMProvider):
     async def process_turn(self, category: str, answer_text: str, history: List[Dict[str, Any]]) -> Dict[str, Any]:
-        cleaned = answer_text.strip().lower()
+        cleaned = (answer_text or "").strip().lower()
 
-        # Check for unknown / don't know responses
-        is_unknown = any(phrase in cleaned for phrase in ["don't know", "dont know", "don't remember", "dont remember", "maloom nahi", "pata nahi", "yaad nahi"])
+        # Check for unknown / don't know responses (empty input is unknown too)
+        is_unknown = not cleaned or any(phrase in cleaned for phrase in ["don't know", "dont know", "don't remember", "dont remember", "maloom nahi", "pata nahi", "yaad nahi"])
 
         evidence_items = []
 

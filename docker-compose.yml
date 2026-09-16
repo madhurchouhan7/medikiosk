@@ -19,4 +19,13 @@ services:
     environment:
       - LLM_PROVIDER=MOCK
       - STT_PROVIDER=MOCK
-      - OCR_PROVIDER=MOCK
+      - OCR_PROVIDER=TESSERACT
+      - FRONTEND_ORIGINS=http://localhost:3000
+      - MEDIKIOSK_DATA_FILE=/data/medikiosk_store.json
+      - MEDIKIOSK_UPLOADS=/data/uploads
+    volumes:
+      # Patient snapshots + uploaded scans survive container restarts.
+      - medikiosk-data:/data
+
+volumes:
+  medikiosk-data:
