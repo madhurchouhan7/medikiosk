@@ -1,6 +1,6 @@
 import React from 'react';
-import { Activity } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { Logo } from '../common/Logo';
 
 export const Footer: React.FC = () => {
   return (
@@ -9,10 +9,8 @@ export const Footer: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-8">
           <div className="md:col-span-2">
             <div className="flex items-center gap-2.5 mb-3">
-              <div className="w-8 h-8 rounded-lg bg-teal-700 flex items-center justify-center">
-                <Activity className="w-4 h-4 text-white" aria-hidden />
-              </div>
-              <span className="font-semibold text-slate-900">Niramaya</span>
+              <Logo size="sm" imgClassName="border border-slate-200" />
+              <span className="font-semibold text-slate-900">Niraamay</span>
             </div>
             <p className="text-slate-600 text-sm leading-relaxed max-w-md">
               AI-assisted clinical intake for hospital OPDs. Structured history-taking,
@@ -46,7 +44,7 @@ export const Footer: React.FC = () => {
         </div>
 
         <div className="border-t border-slate-200 pt-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs text-slate-500">
-          <p>© {new Date().getFullYear()} Niramaya · Clinical intake prototype</p>
+          <p>© {new Date().getFullYear()} Niraamay · Clinical intake prototype</p>
           <p>For hospital evaluation use. Patient data handling per institutional policy.</p>
         </div>
       </div>

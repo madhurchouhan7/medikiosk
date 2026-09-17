@@ -4,6 +4,7 @@ import {
   Check, X, Loader2, Download,
   AlertTriangle, RefreshCw, Search
 } from 'lucide-react';
+import { Logo } from '../../components/common/Logo';
 import type { ClinicalSummary } from '../../types';
 import { ApiService, ApiError } from '../../services/api';
 import { useOnlineStatus } from '../../services/offline';
@@ -164,7 +165,7 @@ export const DoctorDashboard: React.FC = () => {
             status: 'final',
             type: { coding: [{ system: 'http://loinc.org', code: '34133-9', display: 'Summary of episode note' }] },
             subject: { reference: `Patient/${summary.patient.id}` },
-            title: 'Clinical Intake Summary — Niramaya',
+            title: 'Clinical Intake Summary — Niraamay',
             section: [
               { title: 'Chief Complaint', text: { div: summary.chief_complaint } },
               { title: 'History of Present Illness', text: { div: summary.hpi_summary } },
@@ -206,11 +207,12 @@ export const DoctorDashboard: React.FC = () => {
       <header className="bg-white border-b border-slate-200 px-4 sm:px-6 py-3.5">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-teal-700 flex items-center justify-center">
-              <Stethoscope className="w-5 h-5 text-white" />
-            </div>
+            <Logo size="md" imgClassName="border border-slate-200 shadow-xs" />
             <div>
-              <h1 className="text-base font-semibold text-slate-900 leading-tight">Doctor — clinical intake</h1>
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-base text-slate-900 leading-tight">Niraamay</span>
+                <span className="text-xs px-2 py-0.5 rounded bg-teal-50 text-teal-800 border border-teal-200 font-medium">Doctor Portal</span>
+              </div>
               <p className="text-xs text-slate-500">Review before consultation · verify, don&apos;t re-type</p>
             </div>
           </div>

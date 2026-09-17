@@ -3,6 +3,7 @@ import {
   Settings, Server, Database, Cpu, ShieldCheck, Activity,
   BarChart3, ChevronDown, ChevronUp
 } from 'lucide-react';
+import { Logo } from '../../components/common/Logo';
 import { OperationalMetrics } from '../../types';
 import { ApiService, ApiError } from '../../services/api';
 
@@ -49,11 +50,12 @@ export const AdminDashboard: React.FC = () => {
       <header className="bg-white border-b border-slate-200">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-white border border-slate-200 flex items-center justify-center">
-              <Settings className="w-5 h-5 text-teal-700" />
-            </div>
+            <Logo size="md" imgClassName="border border-slate-200 shadow-xs" />
             <div>
-              <h1 className="text-lg font-semibold tracking-tight">Administration</h1>
+              <div className="flex items-center gap-2">
+                <span className="text-lg font-semibold tracking-tight text-slate-900">Niraamay</span>
+                <span className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200 font-medium">Administration</span>
+              </div>
               <p className="text-[13px] text-slate-500">Operations, audit trail, and system status</p>
             </div>
           </div>

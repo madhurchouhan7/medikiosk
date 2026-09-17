@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Activity, UserCheck, Stethoscope } from 'lucide-react';
+import { UserCheck, Stethoscope } from 'lucide-react';
+import { Logo } from '../common/Logo';
 
 export const Navbar: React.FC = () => {
   const location = useLocation();
@@ -14,12 +15,10 @@ export const Navbar: React.FC = () => {
     <header className="sticky top-0 z-50 bg-white border-b border-slate-200">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         <Link to="/" className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-teal-700 flex items-center justify-center">
-            <Activity className="w-5 h-5 text-white" aria-hidden />
-          </div>
+          <Logo size="md" imgClassName="border border-slate-200 shadow-xs" />
           <div>
             <div className="flex items-center gap-2">
-              <span className="font-semibold text-lg text-slate-900 tracking-tight">Niramaya</span>
+              <span className="font-semibold text-lg text-slate-900 tracking-tight">Niraamay</span>
               <span className="text-[11px] font-medium px-2 py-0.5 rounded border border-slate-200 bg-slate-50 text-slate-600">
                 ABDM Enabled
               </span>

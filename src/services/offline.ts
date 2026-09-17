@@ -10,8 +10,10 @@
 import { useSyncExternalStore, useCallback } from 'react';
 import { ApiService, ApiError, newIdempotencyKey } from './api';
 
-const SNAP_KEY = 'niramaya.session.snapshot.v1';
-const OUTBOX_KEY = 'niramaya.outbox.v1';
+const SNAP_KEY = 'niraamay.session.snapshot.v1';
+const LEGACY_SNAP_KEY = 'niramaya.session.snapshot.v1';
+const OUTBOX_KEY = 'niraamay.outbox.v1';
+const LEGACY_OUTBOX_KEY = 'niramaya.outbox.v1';
 
 export type OutboxOp =
   | { kind: 'answer'; key: string; sessionId: string; questionId: string; category: string; answerText: string; audioBase64?: string | null }
@@ -33,19 +35,22 @@ export function saveSnapshot<T>(snap: T): void {
 
 export function loadSnapshot<T>(): T | null {
   try {
-    const raw = localStorage.getItem(SNAP_KEY);
+    const raw = localStorage.getItem(SNAP_KEY) ?? localStorage.getItem(LEGACY_SNAP_KEY);
     return raw ? JSON.parse(raw) as T : null;
   } catch { return null; }
 }
 
 export function clearSnapshot(): void {
-  try { localStorage.removeItem(SNAP_KEY); } catch { /* ignore */ }
+  try {
+    localStorage.removeItem(SNAP_KEY);
+    localStorage.removeItem(LEGACY_SNAP_KEY);
+  } catch { /* ignore */ }
 }
 
 // ── Outbox ──────────────────────────────────────────────────────────────────
 function readOutbox(): OutboxEntry[] {
   try {
-    const raw = localStorage.getItem(OUTBOX_KEY);
+    const raw = localStorage.getItem(OUTBOX_KEY) ?? localStorage.getItem(LEGACY_OUTBOX_KEY);
     const arr = raw ? JSON.parse(raw) : [];
     return Array.isArray(arr) ? arr : [];
   } catch { return []; }

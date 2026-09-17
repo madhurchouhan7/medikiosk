@@ -3,10 +3,11 @@ import {
   Globe2, Mic, MicOff, Volume2, Check, X, ArrowRight,
   HelpCircle, FileText, AlertTriangle, CheckCircle2,
   ShieldCheck, Activity, AlertOctagon, Upload,
-  Search, UserPlus, Loader2,
+  Search, UserPlus, Loader2, UserCheck,
   File as FileIcon, Clock
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { Logo } from '../../components/common/Logo';
 import { LANGUAGES, UI_STRINGS } from '../../i18n/languages';
 import type { LanguageCode, Question, ExtractedEntity, Patient } from '../../types';
 import { ApiService, ApiError, newIdempotencyKey } from '../../services/api';
@@ -141,7 +142,8 @@ export const KioskContainer: React.FC = () => {
   const [ocrRawText, setOcrRawText] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [resetCountdown, setResetCountdown] = useState(15);
+  const [resetCountdown, setResetCountdown] = useState(25);
+  const [completionStatus, setCompletionStatus] = useState<'SUCCESS' | 'FORWARDED_NAVIGATOR'>('SUCCESS');
 
   const recorder = useVoiceRecorder();
   const tts = useTTS();
@@ -479,19 +481,29 @@ export const KioskContainer: React.FC = () => {
   };
 
   const handleCompleteSession = async () => {
+    let forwarded = isLowConf || assistanceScore < 0.65 || hasRedFlag;
     if (sessionId) {
       try {
         await ApiService.getSummary(sessionId);
+        try {
+          const tasks = await ApiService.getAssistanceTasks();
+          const task = tasks.find(t => t.session_id === sessionId && t.status !== 'RESOLVED');
+          if (task) forwarded = true;
+        } catch {
+          // retain computed forwarded flag
+        }
       } catch (e) {
-        // The doctor view generates the summary on demand; a failure here
-        // must not block the patient. Queue nothing — responses are stored.
-        addToast('warning', 'Summary will be prepared for the doctor shortly. You are done — please wait to be called.');
-        setStep('complete');
-        return;
+        // Fallback gracefully: if summary call failed or network issue, forward for navigator assistance
+        forwarded = true;
       }
     }
+    setCompletionStatus(forwarded ? 'FORWARDED_NAVIGATOR' : 'SUCCESS');
     setStep('complete');
-    addToast('success', 'Your intake is complete. Please wait to be called.');
+    if (forwarded) {
+      addToast('info', 'Your intake has been forwarded to our Hospital Navigator. A friendly staff member will assist you politely.');
+    } else {
+      addToast('success', 'Your clinical report was generated successfully and sent to your doctor.');
+    }
   };
 
   const handleNeedHelp = async () => {
@@ -565,7 +577,7 @@ export const KioskContainer: React.FC = () => {
   useEffect(() => {
     let timer: any;
     if (step === 'complete') {
-      setResetCountdown(15);
+      setResetCountdown(25);
       timer = setInterval(() => {
         setResetCountdown(prev => {
           if (prev <= 1) {
@@ -584,8 +596,9 @@ export const KioskContainer: React.FC = () => {
             setAbhaRecords([]);
             setHasRedFlag(false);
             setIsLowConf(false);
+            setCompletionStatus('SUCCESS');
             setUploadedFiles([]);
-            return 15;
+            return 25;
           }
           return prev - 1;
         });
@@ -613,11 +626,9 @@ export const KioskContainer: React.FC = () => {
       <header className="bg-white border-b border-slate-200 px-4 sm:px-6 py-3">
         <div className="max-w-3xl mx-auto flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-lg bg-teal-700 flex items-center justify-center shrink-0">
-              <Activity className="w-4.5 h-4.5 w-5 h-5 text-white" />
-            </div>
+            <Logo size="md" imgClassName="border border-slate-200 shadow-xs" />
             <div>
-              <div className="text-[15px] font-semibold text-slate-900 leading-tight">Niramaya</div>
+              <div className="text-[15px] font-semibold text-slate-900 leading-tight">Niraamay</div>
               <div className="text-xs text-slate-500">OPD intake · {lang.toUpperCase()}</div>
             </div>
           </div>
@@ -1041,9 +1052,9 @@ export const KioskContainer: React.FC = () => {
             <div className="space-y-4 animate-fadeIn">
               <div className="flex items-center justify-between gap-3 flex-wrap">
                 <h2 className="font-semibold text-slate-900 text-xl">{strings.reviewTitle}</h2>
-                {isLowConf ? (
+                {(isLowConf || assistanceScore < 0.65) ? (
                   <span className="text-xs px-2.5 py-1 rounded border bg-amber-50 text-amber-800 border-amber-200 font-medium">
-                    A staff member will verify the scan
+                    Will be forwarded to Navigator for polite verification
                   </span>
                 ) : (
                   <span className="text-xs px-2.5 py-1 rounded border bg-emerald-50 text-emerald-800 border-emerald-200 font-medium">
@@ -1074,12 +1085,14 @@ export const KioskContainer: React.FC = () => {
                 </div>
               )}
 
-              {isLowConf && (
+              {(isLowConf || assistanceScore < 0.65) && (
                 <div className="p-4 rounded-lg bg-amber-50 border border-amber-200 flex items-start gap-3" role="status">
                   <AlertTriangle className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
                   <div>
-                    <p className="font-semibold text-amber-900">Scan needs a human check</p>
-                    <p className="text-sm text-slate-700 mt-0.5">The handwriting or photo was unclear. Your visit continues — a reviewer will confirm the medicines.</p>
+                    <p className="font-semibold text-amber-900">Forwarding to Hospital Navigator for polite verification</p>
+                    <p className="text-sm text-slate-700 mt-0.5">
+                      Because some answers or document scans had lower confidence, your intake will be forwarded to our Hospital Navigator. A friendly staff member will assist you politely in person to confirm all details before you meet the doctor.
+                    </p>
                   </div>
                 </div>
               )}
@@ -1130,28 +1143,101 @@ export const KioskContainer: React.FC = () => {
 
           {/* COMPLETE */}
           {step === 'complete' && (
-            <div className="text-center space-y-5 animate-fadeIn py-4">
-              <div className="w-16 h-16 rounded-full bg-emerald-600 flex items-center justify-center mx-auto" role="img" aria-label="Complete">
-                <CheckCircle2 className="w-9 h-9 text-white" />
-              </div>
-              <div>
-                <h2 className="text-2xl font-semibold tracking-tight">{strings.thankYou}</h2>
-                <p className="text-[15px] text-slate-600 mt-2 max-w-md mx-auto">{strings.resetNotice}</p>
-              </div>
-              {patient && (
-                <div className="clinical-card p-4 inline-block mx-auto text-left">
-                  <p className="label-micro mb-1">Patient</p>
-                  <p className="font-semibold text-slate-900">{patient.name}</p>
-                  <p className="text-sm text-teal-700 font-mono">{patient.abha_id}</p>
+            <div className="text-center space-y-6 animate-fadeIn py-4">
+              {completionStatus === 'SUCCESS' ? (
+                <div className="space-y-4">
+                  <div className="w-16 h-16 rounded-full bg-emerald-100 border-2 border-emerald-600 flex items-center justify-center mx-auto shadow-sm" role="img" aria-label="Report Generated Successfully">
+                    <CheckCircle2 className="w-10 h-10 text-emerald-700" />
+                  </div>
+                  <div>
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200 mb-2">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
+                      Report Generated Successfully
+                    </span>
+                    <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight text-slate-900">
+                      {strings.reportSuccessTitle || strings.thankYou}
+                    </h2>
+                    <p className="text-[15px] text-slate-600 mt-2 max-w-lg mx-auto leading-relaxed">
+                      {strings.reportSuccessDesc || strings.resetNotice}
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="w-16 h-16 rounded-full bg-amber-100 border-2 border-amber-600 flex items-center justify-center mx-auto shadow-sm" role="img" aria-label="Forwarded to Hospital Navigator">
+                    <UserCheck className="w-10 h-10 text-amber-700" />
+                  </div>
+                  <div>
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-300 mb-2">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-700" />
+                      Assistance Needed · Low Confidence
+                    </span>
+                    <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight text-slate-900">
+                      {strings.forwardedNavigatorTitle || "Intake Forwarded to Navigator"}
+                    </h2>
+                    <p className="text-[15px] text-slate-700 mt-2 max-w-lg mx-auto leading-relaxed">
+                      {strings.forwardedNavigatorDesc}
+                    </p>
+                  </div>
+
+                  <div className="clinical-card p-4 max-w-md mx-auto bg-amber-50/60 border border-amber-200 text-left">
+                    <div className="flex items-start gap-3">
+                      <ShieldCheck className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-sm font-semibold text-amber-900">Our Navigator will help you politely</p>
+                        <p className="text-xs text-amber-800 mt-0.5">
+                          Please take a comfortable seat in the waiting lounge. Our staff navigator will approach you politely with your intake file to verify all details before you see the doctor.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
+
+              {/* Patient details badge */}
+              {patient && (
+                <div className="clinical-card p-4 inline-flex items-center gap-3 mx-auto text-left shadow-xs">
+                  <div className="w-10 h-10 rounded-full bg-teal-50 border border-teal-200 flex items-center justify-center font-bold text-teal-800 shrink-0">
+                    {patient.name.charAt(0)}
+                  </div>
+                  <div>
+                    <p className="font-semibold text-slate-900">{patient.name}</p>
+                    <p className="text-xs text-slate-500 font-mono">ABHA: {patient.abha_id} · {patient.age} yrs · {patient.gender}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Audio Listen Button */}
+              <div className="flex justify-center">
+                <button
+                  onClick={() => {
+                    const textToRead = completionStatus === 'SUCCESS'
+                      ? (strings.reportSuccessDesc || strings.resetNotice)
+                      : (strings.forwardedNavigatorDesc);
+                    setTtsActive(true);
+                    tts.speak(textToRead, lang, () => setTtsActive(false));
+                  }}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-sm font-medium text-slate-700 shadow-xs cursor-pointer"
+                >
+                  <Volume2 className="w-4 h-4 text-teal-700" />
+                  <span>{lang === 'hi' ? 'आवाज में सुनें' : 'Listen aloud'}</span>
+                </button>
+              </div>
+
               <p className="flex items-center justify-center gap-2 text-sm text-slate-500">
                 <Clock className="w-4 h-4" />
                 Clearing this screen in <span className="font-semibold text-slate-900">{resetCountdown}s</span>
               </p>
+
               <div className="flex justify-center gap-2.5">
-                <Link to="/navigator" className="btn-secondary px-4 py-2.5 text-sm">Staff view</Link>
-                <Link to="/doctor" className="btn-primary px-4 py-2.5 text-sm">Doctor view</Link>
+                <Link to="/navigator" className="btn-secondary px-4 py-2.5 text-sm inline-flex items-center gap-1.5">
+                  <UserCheck className="w-4 h-4" />
+                  Staff view
+                </Link>
+                <Link to="/doctor" className="btn-primary px-4 py-2.5 text-sm inline-flex items-center gap-1.5">
+                  <Activity className="w-4 h-4" />
+                  Doctor view
+                </Link>
               </div>
             </div>
           )}

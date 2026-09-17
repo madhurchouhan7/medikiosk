@@ -28,7 +28,7 @@ export const LandingPage: React.FC = () => {
               A calm, structured intake before the consultation begins.
             </h1>
             <p className="text-base sm:text-lg text-slate-600 leading-relaxed mb-3">
-              Niramaya collects the patient&apos;s story — complaints, history, medicines,
+              Niraamay collects the patient&apos;s story — complaints, history, medicines,
               allergies, and old records — and prepares a short, verifiable summary
               so the doctor can focus on examination and decisions.
             </p>
@@ -143,7 +143,7 @@ export const LandingPage: React.FC = () => {
             <div>
               <h2 className="text-xl sm:text-2xl font-semibold tracking-tight mb-2">Safety boundaries</h2>
               <p className="text-slate-600 text-sm sm:text-base mb-6">
-                Niramaya is a history-taking assistant. It is not an autonomous doctor.
+                Niraamay is a history-taking assistant. It is not an autonomous doctor.
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="clinical-card p-5">

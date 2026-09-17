@@ -15,7 +15,7 @@ export const LANGUAGES: LanguageOption[] = [
 
 export const UI_STRINGS: Record<string, Record<string, string>> = {
   en: {
-    welcome: "Welcome to Niramaya",
+    welcome: "Welcome to Niraamay",
     subtitle: "AI-Powered Multilingual Patient Intake Kiosk",
     selectLanguage: "Select Your Language",
     continue: "Continue",
@@ -23,7 +23,7 @@ export const UI_STRINGS: Record<string, Record<string, string>> = {
     abhaTitle: "Patient Identification",
     abhaSubtitle: "Enter ABHA ID, Aadhaar, or Register as New Patient",
     consentTitle: "Patient Information & Audio Consent",
-    consentText: "Niramaya collects your medical symptoms, past conditions, and prescriptions to assist your consulting physician. Your data is protected under Ayushman Bharat digital privacy standards.",
+    consentText: "Niraamay collects your medical symptoms, past conditions, and prescriptions to assist your consulting physician. Your data is protected under Ayushman Bharat digital privacy standards.",
     agree: "I Agree & Begin",
     decline: "Decline",
     readAloud: "Listen Audio",
@@ -43,10 +43,14 @@ export const UI_STRINGS: Record<string, Record<string, string>> = {
     finishBtn: "Complete & Send to Doctor",
     thankYou: "Intake Complete!",
     resetNotice: "Your clinical summary has been routed to the consulting doctor's portal. This kiosk will reset automatically.",
+    reportSuccessTitle: "Intake Report Generated Successfully",
+    reportSuccessDesc: "Your clinical intake report has been compiled and sent directly to the doctor's consultation queue. Please proceed to the OPD waiting area — the doctor will call you shortly.",
+    forwardedNavigatorTitle: "Intake Forwarded to Navigator",
+    forwardedNavigatorDesc: "Due to low confidence or unclear details in your answers or documents, your intake has been forwarded to our Hospital Navigator. A friendly staff member will assist you politely in person to ensure complete accuracy before you meet the doctor. Please take a seat in the waiting area.",
     needHelp: "Need Staff Assistance?",
   },
   hi: {
-    welcome: "निरामया में आपका स्वागत है",
+    welcome: "निरामाय में आपका स्वागत है",
     subtitle: "एआई-संचालित बहुभाषी मरीज प्रवेश कियोस्क",
     selectLanguage: "अपनी भाषा चुनें",
     continue: "आगे बढ़ें",
@@ -54,7 +58,7 @@ export const UI_STRINGS: Record<string, Record<string, string>> = {
     abhaTitle: "मरीज की पहचान (आभा आईडी)",
     abhaSubtitle: "अपनी आभा आईडी, आधार नंबर दर्ज करें या नया पंजीकरण करें",
     consentTitle: "मरीज सहमति एवं सूचना",
-    consentText: "निरामया आपके लक्षणों, पुरानी बीमारियों और पर्चियों की जानकारी एकत्र करता है ताकि आपके डॉक्टर को परामर्श में सहायता मिल सके। आपका डेटा पूरी तरह सुरक्षित है।",
+    consentText: "निरामाय आपके लक्षणों, पुरानी बीमारियों और पर्चियों की जानकारी एकत्र करता है ताकि आपके डॉक्टर को परामर्श में सहायता मिल सके। आपका डेटा पूरी तरह सुरक्षित है।",
     agree: "मैं सहमत हूं और शुरू करें",
     decline: "अस्वीकार करें",
     readAloud: "आवाज में सुनें",
@@ -74,6 +78,10 @@ export const UI_STRINGS: Record<string, Record<string, string>> = {
     finishBtn: "समाप्त करें और डॉक्टर को भेजें",
     thankYou: "पंजीकरण पूरा हुआ!",
     resetNotice: "आपकी जानकारी डॉक्टर के पोर्टल पर भेज दी गई है। यह स्क्रीन स्वतः रीसेट हो जाएगी।",
+    reportSuccessTitle: "रिपोर्ट सफलतापूर्वक तैयार हो गई है",
+    reportSuccessDesc: "आपकी क्लिनिकल रिपोर्ट तैयार करके सीधे परामर्श चिकित्सक (डॉक्टर) के पास भेज दी गई है। कृपया ओपीडी प्रतीक्षा कक्ष में बैठें — डॉक्टर आपको शीघ्र बुलाएंगे।",
+    forwardedNavigatorTitle: "विवरण अस्पताल नेविगेटर को प्रेषित",
+    forwardedNavigatorDesc: "उत्तरों या पर्चे की लिखावट स्पष्ट न होने (कम विश्वसनीयता) के कारण आपका विवरण हमारे अस्पताल नेविगेटर को भेज दिया गया है। हमारे सहयोगी स्टाफ विनम्रतापूर्वक आपके पास आकर सही जानकारी दर्ज करने में मदद करेंगे। कृपया प्रतीक्षा करें।",
     needHelp: "सहायता चाहिए?",
   }
 };
